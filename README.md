@@ -1,6 +1,6 @@
 # DeepSeek Monitor
 
-追踪 DeepSeek 网页端变化的监控系统。自动检测前端部署、Feature Flags 变化、API 端点增减、法律文档更新、GitHub 开源动态和官方状态页面事件。
+追踪 DeepSeek 全平台变化的监控系统。自动检测网页端部署、Feature Flags 变化、API 端点增减、法律文档更新、GitHub 开源动态和官方状态页面事件。
 
 ## 功能
 
@@ -42,8 +42,8 @@ python3 web/server.py
 
 ```bash
 crontab -e
-# 每3小时自动检查一次
-0 */3 * * * cd /path/to/deepseek-monitor && python3 scripts/monitor.py --mode frontend >> logs/cron.log 2>&1
+# 每3小时自动检查一次（包含前端、GitHub、Status Page）
+0 */3 * * * cd /path/to/deepseek-monitor && python3 web/server.py --no-open >> logs/cron.log 2>&1 &
 ```
 
 ## 已发现的真实事件
@@ -59,7 +59,7 @@ crontab -e
 
 ### 2026年3月29日 — 模型静默升级 + 13小时宕机
 
-- **证据**: status.deepseek.com uptimeData JSON、用户报告（掘金、知乎、搜狐、新浪等）
+- **证据**: status.deepseek.com 官方状态页面、用户报告（掘金、知乎、搜狐、新浪等）
 - 网页/APP 服务从 29日 21:35 开始异常，持续到 30日 10:33 修复（近 13 小时）
 - 事件代号: `v5mmslnf9249`
 - **用户观察到的变化**（宕机前）:
@@ -71,14 +71,14 @@ crontab -e
 
 ### 2026年3月30日 — 第二轮宕机（7+ 小时）
 
-- **证据**: status.deepseek.com — `outages: {m: 26023}` ≈ 433 分钟完全中断
+- **证据**: status.deepseek.com 官方状态页面 — 约 433 分钟完全中断
 - 事件代号: `rjs0ljjlqhsw`
 - 3月29日故障修复后不久再次崩溃
 - DeepSeek 网页端史上最长单日中断记录
 
 ### 2026年3月31日 — 第三轮故障
 
-- **证据**: status.deepseek.com — API 33分钟部分中断 + 网页 30分钟完全中断
+- **证据**: status.deepseek.com 官方状态页面 — API 33分钟部分中断 + 网页 30分钟完全中断
 - 三天连续故障的最后一天
 
 ### 2026年4月1日 — 前端代码提交
@@ -91,7 +91,7 @@ crontab -e
 
 ### 2026年4月3日 — CDN 新部署
 
-- **证据**: CDN HTTP `Last-Modified` 响应头
+- **证据**: CDN HTTP `Last-Modified` 响应头、status.deepseek.com 官方状态页面
 - 所有 CDN 静态文件统一更新至 `2026-04-03 08:20:13 GMT`（北京时间 16:20:13）
 - 三个文件（main.js 1.1MB、main.css 221KB、vendors.js 679KB）的修改时间精确到秒一致
 - status.deepseek.com 记录了 103 秒轻微中断
