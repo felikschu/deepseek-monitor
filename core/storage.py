@@ -208,11 +208,8 @@ class StorageManager:
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS status_snapshots (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                status TEXT NOT NULL,
+                components TEXT,
                 incidents TEXT,
-                uptime TEXT,
-                outages TEXT,
-                raw_data TEXT,
                 timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         """)
@@ -766,14 +763,11 @@ class StorageManager:
         """
         cursor = self.conn.cursor()
         cursor.execute("""
-            INSERT INTO status_snapshots (status, incidents, uptime, outages, raw_data)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO status_snapshots (components, incidents)
+            VALUES (?, ?)
         """, (
-            json.dumps(data.get("status", {}), ensure_ascii=False),
+            json.dumps(data.get("components", []), ensure_ascii=False),
             json.dumps(data.get("incidents", []), ensure_ascii=False),
-            json.dumps(data.get("uptime", {}), ensure_ascii=False),
-            json.dumps(data.get("outages", {}), ensure_ascii=False),
-            json.dumps(data.get("raw_data", {}), ensure_ascii=False),
         ))
         self.conn.commit()
 
@@ -781,7 +775,7 @@ class StorageManager:
         """获取最近的状态页面快照"""
         cursor = self.conn.cursor()
         cursor.execute("""
-            SELECT status, incidents, uptime, outages, timestamp
+            SELECT components, incidents, timestamp
             FROM status_snapshots
             ORDER BY timestamp DESC LIMIT 1
         """)
@@ -789,10 +783,8 @@ class StorageManager:
         if not row:
             return None
         return {
-            "status": json.loads(row["status"]),
-            "incidents": json.loads(row["incidents"]),
-            "uptime": json.loads(row["uptime"]),
-            "outages": json.loads(row["outages"]),
+            "components": json.loads(row["components"]) if row["components"] else [],
+            "incidents": json.loads(row["incidents"]) if row["incidents"] else [],
             "timestamp": row["timestamp"],
         }
 
