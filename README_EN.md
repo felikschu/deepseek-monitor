@@ -2,6 +2,10 @@
 
 A monitoring system that tracks changes across the entire DeepSeek platform. Automatically detects web frontend deployments, Feature Flags changes, API endpoint additions/removals, legal document updates, GitHub open source activities, and official status page incidents.
 
+> **中文**: 追踪 DeepSeek 全平台变化的监控系统。自动检测网页端部署、Feature Flags 变化、API 端点增减、法律文档更新、GitHub 开源动态和官方状态页面事件。
+>
+> 📄 [中文 README](README.md)
+
 ## Features
 
 - **Frontend Deployment Tracking** — Detects commit-id and JS/CSS file hash changes

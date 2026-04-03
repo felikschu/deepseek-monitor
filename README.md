@@ -2,6 +2,10 @@
 
 追踪 DeepSeek 全平台变化的监控系统。自动检测网页端部署、Feature Flags 变化、API 端点增减、法律文档更新、GitHub 开源动态和官方状态页面事件。
 
+> **English**: A monitoring system that tracks changes across the entire DeepSeek platform. Automatically detects web frontend deployments, Feature Flags changes, API endpoint additions/removals, legal document updates, GitHub open source activities, and official status page incidents.
+>
+> 📄 [English README](README_EN.md)
+
 ## 功能
 
 - **前端部署追踪** — 检测 commit-id、JS/CSS 文件 hash 变化
