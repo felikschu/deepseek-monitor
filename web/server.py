@@ -380,36 +380,25 @@ async def api_status_page(request):
         cur = conn.cursor()
         # 获取最新快照
         cur.execute("""
-            SELECT status, incidents, uptime, outages, timestamp
+            SELECT components, incidents, timestamp
             FROM status_snapshots
             ORDER BY timestamp DESC LIMIT 1
         """)
         row = cur.fetchone()
 
-        # 获取最近事件
-        cur.execute("""
-            SELECT incident_id, title, impact, components, status, created_at, resolved_at
-            FROM status_incidents
-            ORDER BY created_at DESC LIMIT 20
-        """)
-        incidents = rows_to_list(cur.fetchall())
-        for inc in incidents:
-            try:
-                inc["components"] = json.loads(inc["components"])
-            except (json.JSONDecodeError, TypeError):
-                pass
-
         if not row:
             return web.json_response({
                 "current": None,
-                "incidents": incidents,
+                "incidents": [],
             })
+
+        # 解析数据
+        components = json.loads(row["components"]) if row["components"] else []
+        incidents = json.loads(row["incidents"]) if row["incidents"] else []
 
         return web.json_response({
             "current": {
-                "status": json.loads(row["status"]),
-                "uptime": json.loads(row["uptime"]),
-                "outages": json.loads(row["outages"]),
+                "components": components,
                 "timestamp": row["timestamp"],
             },
             "incidents": incidents,
