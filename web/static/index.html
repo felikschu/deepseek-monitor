@@ -829,7 +829,6 @@ function renderChanges(changes) {
         <div><strong>影响级别:</strong> ${d.impact || '未知'}</div>
         <div><strong>影响组件:</strong> ${(d.components || []).join(', ') || '未知'}</div>
         <div><strong>检测时间:</strong> ${toBJ(c.timestamp)}</div>
-      </div>`
       </div>`;
     } else if (d.description || d.note) {
       // 通用详情展开（适用于 new_feature, commit_change 等）
