@@ -1,0 +1,43 @@
+# DeepSeek 网页端变化追踪系统依赖
+
+# 网络请求
+requests>=2.31.0
+aiohttp>=3.9.0
+
+# 网页解析和浏览器自动化
+playwright>=1.40.0
+beautifulsoup4>=4.12.0
+lxml>=4.9.0
+
+# 数据处理
+pandas>=2.1.0
+numpy>=1.24.0
+
+# 配置管理
+pyyaml>=6.0
+python-dotenv>=1.0.0
+
+# 数据存储
+sqlite3  # Python 标准库
+
+# 日志和监控
+loguru>=0.7.0
+
+# 日期时间处理
+python-dateutil>=2.8.0
+pytz>=2023.3
+
+# 哈希计算
+hashlib  # Python 标准库
+
+# 文件差异比较
+difflib  # Python 标准库
+
+# 告警通知
+# 如果需要邮件通知，取消下面的注释
+# smtplib  # Python 标准库
+# emails>=0.6
+
+# 数据可视化（可选，用于生成报告图表）
+# matplotlib>=3.7.0
+# plotly>=5.17.0

@@ -1,0 +1,202 @@
+# DeepSeek 网页端变化追踪系统配置
+
+# 监控配置
+monitoring:
+  # 监控间隔（小时）- 建议每2-4小时检查一次，避免频繁请求
+  check_interval_hours: 3
+
+  # 并发监控任务数
+  max_concurrent_checks: 2
+
+  # 请求超时时间（秒）
+  timeout_seconds: 30
+
+  # 重试配置
+  retry:
+    max_attempts: 3
+    backoff_seconds: 5
+
+# 目标URL配置
+targets:
+  base_url: "https://chat.deepseek.com"
+  cdn_base: "https://fe-static.deepseek.com/chat/static"
+  legal_docs_base: "https://cdn.deepseek.com/policies/en-US"
+
+  # 需要监控的端点
+  endpoints:
+    - url: "/"
+      type: "page"
+      name: "主页"
+
+    - url: "/api/v0/models"
+      type: "api"
+      name: "模型列表API"
+
+    - url: "/api/v0/users"
+      type: "api"
+      name: "用户API"
+
+# 前端资源监控
+frontend:
+  # 关键JS文件模式
+  js_patterns:
+    - "main.[hash].js"
+    - "default-vendors.[hash].js"
+
+  # CSS文件模式
+  css_patterns:
+    - "main.[hash].css"
+
+  # 需要提取的关键代码片段（用于检测功能变化）
+  key_patterns:
+    - pattern: 'model_configs'
+      description: "模型配置相关代码"
+    - pattern: 'model_type'
+      description: "模型类型配置"
+    - pattern: 'file_feature'
+      description: "文件上传功能"
+    - pattern: 'search_feature'
+      description: "联网搜索功能"
+    - pattern: 'DeepSeek-[A-Z][0-9]'
+      description: "模型版本标识"
+
+# 行为监控配置
+behavior:
+  # 标准测试用例
+  test_cases:
+    - prompt: "你好"
+      category: "基础对话"
+      expected_behavior: "正常回复"
+
+    - prompt: "1+1等于几？"
+      category: "数学计算"
+      expected_behavior: "给出答案2"
+
+    - prompt: "今天天气怎么样？"
+      category: "联网搜索"
+      expected_behavior: "可能触发搜索功能"
+
+    - prompt: "写一个Python函数计算斐波那契数列"
+      category: "代码生成"
+      expected_behavior: "生成Python代码"
+
+  # 响应分析指标
+  metrics:
+    - response_time
+    - response_length
+    - has_code_blocks
+    - has_search_results
+    - model_signature
+
+# 数据存储配置
+storage:
+  # 数据保留天数
+  retention_days: 90
+
+  # 数据库类型: sqlite, json, csv
+  type: "sqlite"
+
+  # 存储路径
+  sqlite_path: "data/deepseek_monitor.db"
+  json_path: "data/snapshots"
+  csv_path: "data/reports"
+
+# 告警配置
+alerts:
+  # 是否启用告警
+  enabled: true
+
+  # 告警方式: console, email, webhook
+  methods:
+    - console
+
+  # 告警阈值
+  thresholds:
+    # JS文件hash变化
+    js_hash_change: true
+
+    # 新增/删除关键代码模式
+    pattern_change: true
+
+    # API响应结构变化
+    api_structure_change: true
+
+    # 响应时间异常（超过基准的2倍）
+    response_time_anomaly: true
+
+# 报告配置
+reporting:
+  # 生成日报
+  daily_report: true
+
+  # 生成周报
+  weekly_report: true
+
+  # 报告格式
+  formats:
+    - markdown
+    - json
+
+  # 报告路径
+  output_path: "reports"
+
+# 浏览器自动化配置（用于行为测试）
+browser:
+  # 是否使用无头模式
+  headless: true
+
+  # 浏览器类型: chromium, firefox, webkit
+  type: "chromium"
+
+  # 用户代理
+  user_agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
+
+  # 页面加载超时
+  page_timeout: 30000
+
+# 日志配置
+logging:
+  # 日志级别: DEBUG, INFO, WARNING, ERROR
+  level: "INFO"
+
+  # 日志路径
+  file_path: "logs/monitor.log"
+
+  # 控制台输出
+  console: true
+
+  # 日志轮转
+  rotation:
+    max_size_mb: 10
+    backup_count: 5
+
+# 高级追踪配置（基于实际逆向分析）
+tracking:
+  # commit-id 提取
+  commit_id:
+    enabled: true
+    # HTML meta 标签名
+    meta_name: "commit-id"
+
+  # Feature flags 追踪
+  feature_flags:
+    enabled: true
+    # JS 中的匹配模式
+    pattern: 'getFeature("NAME", DEFAULT)'
+
+  # API 端点追踪
+  api_endpoints:
+    enabled: true
+    pattern: '"/api/v0/ENDPOINT"'
+
+  # 法律文档更新检测
+  legal_docs:
+    - name: "Terms of Use"
+      url: "https://cdn.deepseek.com/policies/en-US/deepseek-terms-of-use.html"
+    - name: "Privacy Policy"
+      url: "https://cdn.deepseek.com/policies/en-US/deepseek-privacy-policy.html"
+
+  # CDN 资源修改时间追踪
+  cdn_tracking:
+    enabled: true
+    check_method: "HEAD"
