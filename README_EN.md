@@ -1,5 +1,7 @@
 # DeepSeek Monitor
 
+> **🚨 Why This Exists**: DeepSeek V4 is taking forever to release, and let's be honest—we're all getting a bit impatient (myself included)! This system was born out of pure "update anxiety"—if we can't have the new model yet, we might as well stalk DeepSeek's every move and see what they're secretly cooking up! 🔍
+
 A monitoring system that tracks changes across the entire DeepSeek platform. Automatically detects web frontend deployments, Feature Flags changes, API endpoint additions/removals, legal document updates, GitHub open source activities, and official status page incidents.
 
 > **中文**: 追踪 DeepSeek 全平台变化的监控系统。自动检测网页端部署、Feature Flags 变化、API 端点增减、法律文档更新、GitHub 开源动态和官方状态页面事件。

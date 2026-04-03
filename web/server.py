@@ -542,6 +542,11 @@ async def _run_check():
 _current_interval_minutes = CONFIG.get("monitoring", {}).get("check_interval_hours", 3) * 60
 
 
+async def on_startup(app):
+    """服务器启动时开启后台检查"""
+    app["auto_check"] = asyncio.create_task(_auto_check_task(app))
+
+
 async def _auto_check_task(app):
     """后台自动检查任务"""
     global _current_interval_minutes
