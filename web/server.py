@@ -267,19 +267,83 @@ async def api_check(request):
 
         await storage.save_check_results(results)
         await monitor.cleanup()
+
+        # 同时执行 GitHub 检查
+        gh_changes = []
+        try:
+            from core.github_monitor import GitHubMonitor
+            gh = GitHubMonitor(CONFIG, storage)
+            gh_results = await gh.check()
+            gh_changes = gh_results.get("changes", [])
+            await gh.cleanup()
+        except Exception as e:
+            logger.warning(f"GitHub 检查失败（非致命）: {e}")
+
         await storage.close()
 
         changes = results.get("changes", [])
+        total = len(changes) + len(gh_changes)
         commit_info = results.get("commit", {})
         return web.json_response({
             "status": "ok",
-            "changes_detected": len(changes),
+            "changes_detected": total,
+            "frontend_changes": len(changes),
+            "github_changes": len(gh_changes),
             "commit": commit_info,
             "timestamp": results.get("timestamp"),
         })
     except Exception as e:
         logger.error(f"检查失败: {e}")
         return web.json_response({"status": "error", "message": str(e)}, status=500)
+
+
+async def api_github_repos(request):
+    """GitHub 仓库快照"""
+    conn = get_db()
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT repos, repo_count, timestamp
+            FROM github_snapshots
+            ORDER BY timestamp DESC LIMIT 1
+        """)
+        row = cur.fetchone()
+        if not row:
+            return web.json_response({"repos": [], "count": 0})
+
+        repos = json.loads(row["repos"])
+        # 按星数排序
+        repos.sort(key=lambda r: r.get("stars", 0), reverse=True)
+
+        return web.json_response({
+            "repos": repos,
+            "count": row["repo_count"],
+            "timestamp": row["timestamp"],
+        })
+    finally:
+        conn.close()
+
+
+async def api_github_releases(request):
+    """GitHub Release 历史"""
+    limit = int(request.query.get("limit", 20))
+    conn = get_db()
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT repo_name, tag_name, published_at, release_data, timestamp
+            FROM github_releases
+            ORDER BY published_at DESC LIMIT ?
+        """, (limit,))
+        rows = rows_to_list(cur.fetchall())
+        for r in rows:
+            try:
+                r["release_data"] = json.loads(r["release_data"])
+            except (json.JSONDecodeError, TypeError):
+                pass
+        return web.json_response({"releases": rows})
+    finally:
+        conn.close()
 
 
 async def index(request):
@@ -363,6 +427,8 @@ def create_app():
     app.router.add_get("/api/cdn", api_cdn)
     app.router.add_post("/api/check", api_check)
     app.router.add_get("/api/export", export_report)
+    app.router.add_get("/api/github/repos", api_github_repos)
+    app.router.add_get("/api/github/releases", api_github_releases)
 
     # Static files
     app.router.add_static("/static", STATIC_DIR)

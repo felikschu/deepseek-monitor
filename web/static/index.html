@@ -113,7 +113,7 @@ tr:hover td{background:rgba(255,255,255,.03)}
   <div class="stat"><div class="label">总变更</div><div class="value green" id="statTotal">0</div></div>
   <div class="stat"><div class="label">7天变更</div><div class="value orange" id="statWeek">0</div></div>
   <div class="stat"><div class="label">Feature Flags</div><div class="value purple" id="statFlags">0</div></div>
-  <div class="stat"><div class="label">API 端点</div><div class="value cyan" id="statEndpoints">0</div></div>
+  <div class="stat"><div class="label">GitHub 仓库</div><div class="value cyan" id="statGHRepos">0</div></div>
 </div>
 
 <div class="main">
@@ -196,6 +196,32 @@ tr:hover td{background:rgba(255,255,255,.03)}
       <thead><tr><th>文档</th><th>Last-Modified</th><th>记录时间</th></tr></thead>
       <tbody id="legalBody"></tbody>
     </table>
+  </div>
+
+  <!-- GitHub 监控 -->
+  <div class="card full">
+    <h2>
+      <span class="left">
+        GitHub (deepseek-ai) <span class="badge" id="ghRepoCount">0</span>
+        <button class="btn-help" onclick="showHelp('github')" title="GitHub 说明">?</button>
+      </span>
+      <div class="filter-tabs" id="ghTabs">
+        <button class="active" onclick="showGithubTab('repos',this)">仓库</button>
+        <button onclick="showGithubTab('releases',this)">Release</button>
+      </div>
+    </h2>
+    <div id="ghReposPanel">
+      <table>
+        <thead><tr><th>仓库</th><th>Stars</th><th>语言</th><th>最近推送</th></tr></thead>
+        <tbody id="ghReposBody"></tbody>
+      </table>
+    </div>
+    <div id="ghReleasesPanel" style="display:none">
+      <table>
+        <thead><tr><th>仓库</th><th>Tag</th><th>发布时间</th><th>记录时间</th></tr></thead>
+        <tbody id="ghReleasesBody"></tbody>
+      </table>
+    </div>
   </div>
 </div>
 
@@ -377,6 +403,27 @@ const HELP = {
       <h4>为什么重要？</h4>
       <p>法律文档更新通常是<strong>重大产品变更的前兆</strong>。例如 2026年3月27日两份文档同时更新，两天后（3月29日）DeepSeek 就发生了模型升级 + 13小时宕机事件。</p>
       <p>所以当这个面板出现变化时，建议密切关注接下来的 1-3 天。</p>
+    </div>
+  `,
+  github: `
+    <h3>&#x1F4BB; GitHub 监控 (deepseek-ai)</h3>
+    <div class="help-section">
+      <h4>这是什么？</h4>
+      <p>追踪 DeepSeek 官方 GitHub 组织 <code>deepseek-ai</code> 的活动。GitHub 是 DeepSeek 发布开源模型和工具的主要平台。</p>
+    </div>
+    <div class="help-section">
+      <h4>监控内容</h4>
+      <table>
+        <tr><td><strong>新仓库</strong></td><td>deepseek-ai 创建了新的公开仓库（如 2025年初集中发布 V3/R1 系列）</td></tr>
+        <tr><td><strong>代码推送</strong></td><td>仓库有新 commit 推送（pushed_at 变化）</td></tr>
+        <tr><td><strong>Release/Tag</strong></td><td>新版本发布，通常伴随模型权重更新或重大功能更新</td></tr>
+        <tr><td><strong>Star 数变化</strong></td><td>Star 数涨幅超过 5% 时记录（如 R1 发布后暴涨）</td></tr>
+      </table>
+    </div>
+    <div class="help-section">
+      <h4>近期重要动态</h4>
+      <p><strong>2026年3月</strong> — 集中发布 3FS（文件系统）、FlashMLA（MLA解码内核）、DeepEP（Expert Parallelism通信库）、DeepGEMM（FP8 GEMM库）等基础设施项目</p>
+      <p><strong>2026年1月</strong> — 新增 DeepSeek-OCR-2、Engram 等项目</p>
     </div>
   `,
 };
@@ -635,7 +682,6 @@ async function loadEndpoints() {
     if (!snaps.length) return;
     const eps = snaps[0].endpoints || [];
     document.getElementById('epCount').textContent = eps.length;
-    document.getElementById('statEndpoints').textContent = eps.length;
 
     const prev = snaps[1];
     const prevEps = prev ? (prev.endpoints || []) : [];
@@ -676,6 +722,54 @@ async function loadLegal() {
   } catch(e) { console.error('Legal failed:', e); }
 }
 
+async function loadGithub() {
+  try {
+    const data = await fetchJSON('/api/github/repos');
+    const repos = data.repos || [];
+    document.getElementById('ghRepoCount').textContent = repos.length || data.count || 0;
+    document.getElementById('statGHRepos').textContent = repos.length || data.count || 0;
+
+    const tbody = document.getElementById('ghReposBody');
+    if (!repos.length) {
+      tbody.innerHTML = '<tr><td colspan="4" style="color:var(--text-dim)">暂无数据，点击「立即检查」开始监控</td></tr>';
+    } else {
+      tbody.innerHTML = repos.slice(0, 30).map(r => `<tr>
+        <td><a href="${r.html_url}" target="_blank" style="color:var(--accent);text-decoration:none">${r.name}</a>
+          ${r.archived ? '<span style="color:var(--text-dim);font-size:10px"> [archived]</span>' : ''}</td>
+        <td style="font-family:monospace">${(r.stars||0).toLocaleString()}</td>
+        <td style="font-size:12px;color:var(--text-dim)">${r.language || '---'}</td>
+        <td style="font-size:12px">${toBJShort(r.pushed_at)}</td>
+      </tr>`).join('');
+    }
+  } catch(e) { console.error('GitHub repos failed:', e); }
+
+  try {
+    const data = await fetchJSON('/api/github/releases?limit=20');
+    const releases = data.releases || [];
+    const tbody = document.getElementById('ghReleasesBody');
+    if (!releases.length) {
+      tbody.innerHTML = '<tr><td colspan="4" style="color:var(--text-dim)">暂无 Release 记录</td></tr>';
+    } else {
+      tbody.innerHTML = releases.map(r => {
+        const rd = r.release_data || {};
+        return `<tr>
+          <td><a href="${rd.repo_url || '#'}" target="_blank" style="color:var(--accent);text-decoration:none">${r.repo_name}</a></td>
+          <td style="font-family:monospace;font-size:12px"><a href="${rd.url || '#'}" target="_blank" style="color:var(--text);text-decoration:none">${r.tag_name}</a></td>
+          <td style="font-size:12px">${toBJShort(r.published_at)}</td>
+          <td style="font-size:12px">${toBJShort(r.timestamp)}</td>
+        </tr>`;
+      }).join('');
+    }
+  } catch(e) { console.error('GitHub releases failed:', e); }
+}
+
+function showGithubTab(tab, btn) {
+  document.querySelectorAll('#ghTabs button').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  document.getElementById('ghReposPanel').style.display = tab === 'repos' ? '' : 'none';
+  document.getElementById('ghReleasesPanel').style.display = tab === 'releases' ? '' : 'none';
+}
+
 async function runCheck() {
   const btn = document.getElementById('btnCheck');
   btn.disabled = true;
@@ -712,6 +806,7 @@ async function loadAll() {
     loadEndpoints(),
     loadCdn(),
     loadLegal(),
+    loadGithub(),
   ]);
 }
 

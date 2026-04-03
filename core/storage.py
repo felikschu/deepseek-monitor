@@ -182,9 +182,32 @@ class StorageManager:
         # 创建索引
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_resource_hashes_filename ON resource_hashes(filename)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_test_results_prompt ON test_results(prompt)")
+        # GitHub 监控相关表
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS github_snapshots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                repos TEXT NOT NULL,
+                repo_count INTEGER,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS github_releases (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                repo_name TEXT NOT NULL,
+                tag_name TEXT NOT NULL,
+                published_at TEXT,
+                release_data TEXT,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(repo_name, tag_name)
+            )
+        """)
+
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_changes_history_type ON changes_history(change_type)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_commit_history_id ON commit_history(commit_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_legal_docs_name ON legal_docs(doc_name)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_github_releases_repo ON github_releases(repo_name)")
 
         self.conn.commit()
 
@@ -625,6 +648,72 @@ class StorageManager:
         row = cursor.fetchone()
         return dict(row) if row else None
 
+    # ── GitHub 监控方法 ──
+
+    async def save_github_snapshot(self, repos: List[Dict]):
+        """保存 GitHub 仓库快照"""
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            INSERT INTO github_snapshots (repos, repo_count)
+            VALUES (?, ?)
+        """, (json.dumps(repos, ensure_ascii=False), len(repos)))
+        self.conn.commit()
+
+    async def get_last_github_snapshot(self) -> Optional[Dict]:
+        """获取最近的 GitHub 快照"""
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            SELECT repos, repo_count, timestamp
+            FROM github_snapshots
+            ORDER BY timestamp DESC LIMIT 1
+        """)
+        row = cursor.fetchone()
+        if not row:
+            return None
+        return {
+            "repos": json.loads(row["repos"]),
+            "count": row["repo_count"],
+            "timestamp": row["timestamp"],
+        }
+
+    async def save_github_release(self, repo_name: str, tag_name: str,
+                                  published_at: str, release_data: Dict):
+        """保存 GitHub Release 记录"""
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            INSERT OR IGNORE INTO github_releases (repo_name, tag_name, published_at, release_data)
+            VALUES (?, ?, ?, ?)
+        """, (repo_name, tag_name, published_at,
+              json.dumps(release_data, ensure_ascii=False)))
+        self.conn.commit()
+
+    async def is_github_release_known(self, repo_name: str, tag_name: str) -> bool:
+        """检查 Release 是否已知"""
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            SELECT id FROM github_releases
+            WHERE repo_name = ? AND tag_name = ?
+        """, (repo_name, tag_name))
+        return cursor.fetchone() is not None
+
+    async def get_github_releases(self, limit: int = 20) -> List[Dict]:
+        """获取 GitHub Release 历史"""
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            SELECT repo_name, tag_name, published_at, release_data, timestamp
+            FROM github_releases
+            ORDER BY published_at DESC LIMIT ?
+        """, (limit,))
+        rows = []
+        for row in cursor.fetchall():
+            r = dict(row)
+            try:
+                r["release_data"] = json.loads(r["release_data"])
+            except (json.JSONDecodeError, TypeError):
+                pass
+            rows.append(r)
+        return rows
+
     async def cleanup_old_data(self, retention_days: int = 90):
         """清理旧数据
 
@@ -647,7 +736,8 @@ class StorageManager:
             "commit_history",
             "feature_flags",
             "legal_docs",
-            "cdn_resources"
+            "cdn_resources",
+            "github_snapshots",
         ]
 
         for table in tables:
