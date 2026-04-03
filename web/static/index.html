@@ -208,9 +208,12 @@ tr:hover td{background:rgba(255,255,255,.03)}
         Status Page <span class="badge" id="statusPageCount">0</span>
         <button class="btn-help" onclick="showHelp('status')" title="Status Page 说明">?</button>
       </span>
-      <div class="filter-tabs" id="statusTabs">
-        <button class="active" onclick="showStatusTab('current',this)">当前状态</button>
-        <button onclick="showStatusTab('incidents',this)">事件历史</button>
+      <div style="display:flex;align-items:center;gap:8px">
+        <button class="btn btn-secondary" id="timeFormatBtn" onclick="toggleTimeFormat()" style="font-size:11px;padding:4px 10px">显示北京时间</button>
+        <div class="filter-tabs" id="statusTabs">
+          <button class="active" onclick="showStatusTab('current',this)">当前状态</button>
+          <button onclick="showStatusTab('incidents',this)">事件历史</button>
+        </div>
       </div>
     </h2>
     <div id="statusCurrentPanel" style="max-height:300px;overflow-y:auto">
@@ -998,6 +1001,36 @@ function exportReport() {
   window.open(API + '/api/export?days=7', '_blank');
 }
 
+// 时间格式切换状态
+let showBJTime = false;
+
+// 将 CST 时间字符串转换为北京时间显示
+function convertToBJTime(cstTimeStr) {
+  if (!cstTimeStr) return '';
+  // CST 就是北京时间 (UTC+8)，所以只需要重新格式化
+  // 输入格式: "Apr  3, 16:50 CST" 或 "Mar 31, 18:05 CST"
+  const match = cstTimeStr.match(/([A-Za-z]+)\s+(\d+),\s+(\d+):(\d+)\s+CST/);
+  if (match) {
+    const [, month, day, hour, minute] = match;
+    return `${month} ${day}日 ${hour}:${minute}`;
+  }
+  return cstTimeStr;
+}
+
+// 将 ISO 时间转换为北京时间
+function convertISOToBJ(isoString) {
+  if (!isoString) return '';
+  const d = new Date(isoString);
+  return d.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false });
+}
+
+function toggleTimeFormat() {
+  showBJTime = !showBJTime;
+  const btn = document.getElementById('timeFormatBtn');
+  btn.textContent = showBJTime ? '显示原始时间' : '显示北京时间';
+  loadStatusPage(); // 重新加载
+}
+
 async function loadStatusPage() {
   try {
     const data = await fetchJSON('/api/status_page');
@@ -1048,22 +1081,28 @@ async function loadStatusPage() {
         // 格式化时间线
         let timelineHtml = '';
         if (inc.timeline && inc.timeline.length > 0) {
-          const startTime = inc.timeline[inc.timeline.length - 1]?.time || '';
-          const endTime = inc.timeline[0]?.time || '';
+          const startTime = showBJTime ? convertToBJTime(inc.timeline[inc.timeline.length - 1]?.time) : inc.timeline[inc.timeline.length - 1]?.time;
+          const endTime = showBJTime ? convertToBJTime(inc.timeline[0]?.time) : inc.timeline[0]?.time;
           timelineHtml = `<div style="font-size:11px;color:var(--text-dim);margin-top:4px">${startTime} → ${endTime}</div>`;
         } else if (inc.published) {
           // 使用 published 时间
-          const pubDate = new Date(inc.published);
-          timelineHtml = `<div style="font-size:11px;color:var(--text-dim);margin-top:4px">${pubDate.toLocaleString('zh-CN')}</div>`;
+          const pubDate = showBJTime ? convertISOToBJ(inc.published) : new Date(inc.published).toLocaleString('zh-CN');
+          timelineHtml = `<div style="font-size:11px;color:var(--text-dim);margin-top:4px">${pubDate}</div>`;
         }
         
+        // 格式化日期列
+        const dateStr = inc.published ? (showBJTime ? convertISOToBJ(inc.published).split(' ')[0] : new Date(inc.published).toLocaleDateString('zh-CN')) : '---';
+        
         return `<tr style="cursor:pointer" onclick="toggleIncidentDetail('${inc.id}')">
-          <td style="font-size:12px;white-space:nowrap">${inc.published ? new Date(inc.published).toLocaleDateString('zh-CN') : '---'}</td>
+          <td style="font-size:12px;white-space:nowrap">${dateStr}</td>
           <td style="font-size:12px">
             ${inc.name || '---'}
             ${timelineHtml}
             <div id="inc-detail-${inc.id}" style="display:none;margin-top:8px;padding:8px;background:rgba(255,255,255,.05);border-radius:4px;font-size:11px;line-height:1.6">
-              ${inc.timeline ? inc.timeline.map(t => `<div><strong>${t.time}</strong> ${t.status}${t.description ? ': ' + t.description : ''}</div>`).join('') : ''}
+              ${inc.timeline ? inc.timeline.map(t => {
+                const timeStr = showBJTime ? convertToBJTime(t.time) : t.time;
+                return `<div><strong>${timeStr}</strong> ${t.status}${t.description ? ': ' + t.description : ''}</div>`;
+              }).join('') : ''}
               ${inc.link ? `<div style="margin-top:4px"><a href="${inc.link}" target="_blank" style="color:var(--accent)">查看详情</a></div>` : ''}
             </div>
           </td>
