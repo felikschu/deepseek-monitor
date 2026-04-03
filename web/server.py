@@ -285,16 +285,37 @@ async def api_check(request):
         except Exception as e:
             logger.warning(f"GitHub 检查失败（非致命）: {e}")
 
+        # 同时执行 Status Page 检查
+        status_changes = []
+        try:
+            from core.status_monitor import StatusMonitor
+            sm = StatusMonitor(CONFIG, storage)
+            status_results = await sm.check()
+            status_changes = status_results.get("changes", [])
+            # 保存 Status 变化到 changes_history
+            for change in status_changes:
+                await storage.save_change(
+                    change.get("type", "status"),
+                    change
+                )
+            # 保存事件
+            for inc in status_results.get("incidents", []):
+                await storage.save_status_incident(inc)
+            await sm.cleanup()
+        except Exception as e:
+            logger.warning(f"Status 检查失败（非致命）: {e}")
+
         await storage.close()
 
         changes = results.get("changes", [])
-        total = len(changes) + len(gh_changes)
+        total = len(changes) + len(gh_changes) + len(status_changes)
         commit_info = results.get("commit", {})
         return web.json_response({
             "status": "ok",
             "changes_detected": total,
             "frontend_changes": len(changes),
             "github_changes": len(gh_changes),
+            "status_changes": len(status_changes),
             "commit": commit_info,
             "timestamp": results.get("timestamp"),
         })
@@ -348,6 +369,51 @@ async def api_github_releases(request):
             except (json.JSONDecodeError, TypeError):
                 pass
         return web.json_response({"releases": rows})
+    finally:
+        conn.close()
+
+
+async def api_status_page(request):
+    """Status Page 状态"""
+    conn = get_db()
+    try:
+        cur = conn.cursor()
+        # 获取最新快照
+        cur.execute("""
+            SELECT status, incidents, uptime, outages, timestamp
+            FROM status_snapshots
+            ORDER BY timestamp DESC LIMIT 1
+        """)
+        row = cur.fetchone()
+
+        # 获取最近事件
+        cur.execute("""
+            SELECT incident_id, title, impact, components, status, created_at, resolved_at
+            FROM status_incidents
+            ORDER BY created_at DESC LIMIT 20
+        """)
+        incidents = rows_to_list(cur.fetchall())
+        for inc in incidents:
+            try:
+                inc["components"] = json.loads(inc["components"])
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        if not row:
+            return web.json_response({
+                "current": None,
+                "incidents": incidents,
+            })
+
+        return web.json_response({
+            "current": {
+                "status": json.loads(row["status"]),
+                "uptime": json.loads(row["uptime"]),
+                "outages": json.loads(row["outages"]),
+                "timestamp": row["timestamp"],
+            },
+            "incidents": incidents,
+        })
     finally:
         conn.close()
 
@@ -417,8 +483,89 @@ async def export_report(request):
         conn.close()
 
 
+async def _auto_check_task(app):
+    """后台自动检查任务"""
+    interval = CONFIG.get("monitoring", {}).get("check_interval_hours", 3)
+    interval_sec = interval * 3600
+    logger.info(f"自动检查已启动，间隔 {interval} 小时")
+
+    # 启动后延迟30秒再执行首次检查，等服务器就绪
+    await asyncio.sleep(30)
+    while True:
+        try:
+            logger.info("执行定时自动检查...")
+            await _run_check()
+            logger.info("定时自动检查完成")
+        except Exception as e:
+            logger.error(f"自动检查失败: {e}")
+        await asyncio.sleep(interval_sec)
+
+
+async def _run_check():
+    """执行一次检查（复用 api_check 逻辑）"""
+    try:
+        from core.frontend_monitor import FrontendMonitor
+        from core.storage import StorageManager
+
+        storage = StorageManager(CONFIG)
+        await storage.initialize()
+        monitor = FrontendMonitor(CONFIG, storage)
+        results = await monitor.check()
+        await storage.save_check_results(results)
+        await monitor.cleanup()
+
+        # GitHub 检查
+        try:
+            from core.github_monitor import GitHubMonitor
+            gh = GitHubMonitor(CONFIG, storage)
+            gh_results = await gh.check()
+            for change in gh_results.get("changes", []):
+                await storage.save_change(
+                    change.get("type", "github"),
+                    change
+                )
+            await gh.cleanup()
+        except Exception as e:
+            logger.warning(f"GitHub 检查失败（非致命）: {e}")
+
+        # Status Page 检查
+        try:
+            from core.status_monitor import StatusMonitor
+            sm = StatusMonitor(CONFIG, storage)
+            status_results = await sm.check()
+            for change in status_results.get("changes", []):
+                await storage.save_change(
+                    change.get("type", "status"),
+                    change
+                )
+            for inc in status_results.get("incidents", []):
+                await storage.save_status_incident(inc)
+            await sm.cleanup()
+        except Exception as e:
+            logger.warning(f"Status 检查失败（非致命）: {e}")
+
+        await storage.close()
+    except Exception as e:
+        logger.error(f"自动检查失败: {e}")
+
+
+async def on_startup(app):
+    """服务器启动时开启后台检查"""
+    app["auto_check"] = asyncio.create_task(_auto_check_task(app))
+
+
+async def on_cleanup(app):
+    """服务器关闭时取消后台任务"""
+    task = app.get("auto_check")
+    if task:
+        task.cancel()
+
+
 def create_app():
     app = web.Application()
+
+    app.on_startup.append(on_startup)
+    app.on_cleanup.append(on_cleanup)
 
     # Routes
     app.router.add_get("/", index)
@@ -435,6 +582,7 @@ def create_app():
     app.router.add_get("/api/export", export_report)
     app.router.add_get("/api/github/repos", api_github_repos)
     app.router.add_get("/api/github/releases", api_github_releases)
+    app.router.add_get("/api/status_page", api_status_page)
 
     # Static files
     app.router.add_static("/static", STATIC_DIR)
@@ -448,6 +596,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="DeepSeek Monitor Dashboard")
     parser.add_argument("--port", "-p", type=int, default=PORT)
     parser.add_argument("--no-open", action="store_true", help="Don't open browser")
+    parser.add_argument("--no-auto", action="store_true", help="Disable auto-check background task")
     args = parser.parse_args()
 
     logger.info(f"Starting DeepSeek Monitor Dashboard on http://localhost:{args.port}")
@@ -456,4 +605,9 @@ if __name__ == "__main__":
         webbrowser.open(f"http://localhost:{args.port}")
 
     app = create_app()
+
+    if args.no_auto:
+        # 取消自动检查
+        app.on_startup.clear()
+
     web.run_app(app, host="0.0.0.0", port=args.port, print=None)

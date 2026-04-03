@@ -167,6 +167,7 @@ tr:hover td{background:rgba(255,255,255,.03)}
         <button onclick="filterChanges('legal_doc_update',this)">法律</button>
         <button onclick="filterChanges('cdn_update',this)">CDN</button>
         <button onclick="filterChanges('new_repo',this)">GitHub</button>
+        <button onclick="filterChanges('status',this)">Status</button>
       </div>
     </h2>
     <div class="changes-list" id="changesList">
@@ -198,6 +199,32 @@ tr:hover td{background:rgba(255,255,255,.03)}
       <thead><tr><th>文档</th><th>Last-Modified</th><th>记录时间</th></tr></thead>
       <tbody id="legalBody"></tbody>
     </table>
+  </div>
+
+  <!-- Status Page 监控 -->
+  <div class="card full">
+    <h2>
+      <span class="left">
+        Status Page <span class="badge" id="statusPageCount">0</span>
+        <button class="btn-help" onclick="showHelp('status')" title="Status Page 说明">?</button>
+      </span>
+      <div class="filter-tabs" id="statusTabs">
+        <button class="active" onclick="showStatusTab('current',this)">当前状态</button>
+        <button onclick="showStatusTab('incidents',this)">事件历史</button>
+      </div>
+    </h2>
+    <div id="statusCurrentPanel">
+      <table>
+        <thead><tr><th>服务组件</th><th>状态</th></tr></thead>
+        <tbody id="statusCurrentBody"></tbody>
+      </table>
+    </div>
+    <div id="statusIncidentsPanel" style="display:none">
+      <table>
+        <thead><tr><th>时间</th><th>事件</th><th>影响</th><th>组件</th></tr></thead>
+        <tbody id="statusIncidentsBody"></tbody>
+      </table>
+    </div>
   </div>
 
   <!-- GitHub 监控 -->
@@ -428,6 +455,31 @@ const HELP = {
       <p><strong>2026年1月</strong> — 新增 DeepSeek-OCR-2、Engram 等项目</p>
     </div>
   `,
+  status: `
+    <h3>&#x1F4CA; Status Page 监控</h3>
+    <div class="help-section">
+      <h4>这是什么？</h4>
+      <p>监控 DeepSeek 官方状态页面 <code>status.deepseek.com</code>。这是 DeepSeek 官方发布服务状态、故障通知的平台。</p>
+    </div>
+    <div class="help-section">
+      <h4>监控内容</h4>
+      <table>
+        <tr><td><strong>服务状态</strong></td><td>网页端、API、移动应用的实时运行状态</td></tr>
+        <tr><td><strong>故障事件</strong></td><td>官方记录的中断事件，包含影响范围和持续时间</td></tr>
+        <tr><td><strong>可用性统计</strong></td><td>各服务的历史可用性百分比</td></tr>
+        <tr><td><strong>中断统计</strong></td><td>今日/本周的完全中断、部分中断时长</td></tr>
+      </table>
+    </div>
+    <div class="help-section">
+      <h4>状态说明</h4>
+      <table>
+        <tr><td><strong>正常运行</strong></td><td>服务完全正常</td></tr>
+        <tr><td><strong>性能下降</strong></td><td>服务可用但响应变慢</td></tr>
+        <tr><td><strong>部分中断</strong></td><td>部分功能不可用</td></tr>
+        <tr><td><strong>完全中断</strong></td><td>服务完全不可用</td></tr>
+      </table>
+    </div>
+  `,
 };
 
 function showHelp(key) {
@@ -552,6 +604,46 @@ const FLAG_DESC = {
   hif_max_retry_interval_secs: '高可用重试的最大间隔时间，单位秒。600 = 最多每10分钟重试一次。',
 };
 
+// API 端点说明
+const API_ENDPOINT_DESC = {
+  '/api/v0/chat/completion': '核心对话接口，发送消息并获取流式响应。这是最主要的聊天 API。',
+  '/api/v0/chat/regenerate': '重新生成最后一条 AI 回复。',
+  '/api/v0/chat/continue': '继续生成被截断的回复（当回复达到长度限制时）。',
+  '/api/v0/chat/stop_stream': '停止当前的流式输出。',
+  '/api/v0/chat/resume_stream': '恢复被中断的流式输出。',
+  '/api/v0/chat/edit_message': '编辑已发送的用户消息。',
+  '/api/v0/chat/history_messages': '获取会话的历史消息列表。',
+  '/api/v0/chat/message_feedback': '对 AI 回复进行点赞/点踩反馈。',
+  '/api/v0/chat/create_pow_challenge': '创建 PoW（工作量证明）挑战，用于反机器人验证。',
+  '/api/v0/chat_session/create': '创建新的聊天会话。',
+  '/api/v0/chat_session/delete': '删除指定的聊天会话。',
+  '/api/v0/chat_session/delete_all': '删除所有聊天会话。',
+  '/api/v0/chat_session/fetch_page': '分页获取会话列表。',
+  '/api/v0/chat_session/update_pinned': '置顶或取消置顶会话。',
+  '/api/v0/chat_session/update_title': '修改会话标题。',
+  '/api/v0/client/settings': '获取客户端远程配置，包含 Feature Flags 等功能开关。',
+  '/api/v0/client/span': '客户端埋点上报接口，用于收集用户行为数据。',
+  '/api/v0/client/wechat_js_sdk_signature': '获取微信 JS SDK 签名，用于微信分享等功能。',
+  '/api/v0/file/upload_file': '上传文件到对话中（支持 PDF、图片等）。',
+  '/api/v0/file/fetch_files': '获取已上传文件的列表。',
+  '/api/v0/file/preview': '预览已上传的文件内容。',
+  '/api/v0/users': '获取当前登录用户的基本信息。',
+  '/api/v0/users/settings': '获取用户个人设置。',
+  '/api/v0/users/update_settings': '更新用户个人设置。',
+  '/api/v0/users/create_email_verification_code': '发送邮箱验证码。',
+  '/api/v0/users/create_sms_verification_code': '发送短信验证码。',
+  '/api/v0/users/create_guest_challenge': '为访客用户创建验证挑战。',
+  '/api/v0/users/logout_all_sessions': '登出所有设备的登录状态。',
+  '/api/v0/users/set_birthday': '设置用户生日信息。',
+  '/api/v0/share/create': '创建对话分享链接。',
+  '/api/v0/share/delete': '删除分享链接。',
+  '/api/v0/share/list': '获取分享链接列表。',
+  '/api/v0/share/content': '获取分享链接的内容（无需登录）。',
+  '/api/v0/share/fork': '将分享的对话复刻到自己的会话中。',
+  '/api/v0/download_export_history': '下载导出的历史记录文件。',
+  '/api/v0/export_all': '导出所有会话数据。',
+};
+
 async function loadFlags() {
   try {
     const data = await fetchJSON('/api/flags?limit=2');
@@ -611,6 +703,7 @@ function renderChanges(changes) {
     pattern_change: ['&#x1F50D;','resource'],
     new_repo: ['&#x1F4BB;','commit'], repo_push: ['&#x1F4BB;','commit'],
     new_release: ['&#x1F680;','endpoint'], stars_change: ['&#x2B50;','commit'],
+    status_change: ['&#x1F4CA;','flag'], new_incident: ['&#x26A0;','legal'],
   };
 
   list.innerHTML = filtered.map(c => {
@@ -654,8 +747,8 @@ function renderChanges(changes) {
         if (d.removed?.length) diff += ` -${d.removed.join(', ')}`;
         break;
       case 'new_feature':
-        title = `新功能: ${d.feature_name}`;
-        diff = d.description || '';
+        title = d.feature_name || '系统事件';
+        diff = (d.description || '').length > 80 ? d.description.slice(0,80)+'...' : (d.description || '');
         break;
       case 'pattern_change':
         title = `代码模式变化: ${d.filename}`;
@@ -677,6 +770,14 @@ function renderChanges(changes) {
       case 'stars_change':
         title = `${d.repo_name} Star 数变化`;
         diff = `${(d.old_stars||0).toLocaleString()} → ${(d.new_stars||0).toLocaleString()} (${d.diff > 0 ? '+' : ''}${(d.diff||0).toLocaleString()})`;
+        break;
+      case 'status_change':
+        title = `${d.component_name} 状态变化`;
+        diff = `${d.old_status} → ${d.new_status}`;
+        break;
+      case 'new_incident':
+        title = `Status Page: ${d.title}`;
+        diff = `影响: ${d.impact || '未知'} | 组件: ${(d.components || []).join(', ')}`;
         break;
     }
 
@@ -715,6 +816,28 @@ function renderChanges(changes) {
         <div><strong>变化后:</strong> ${(d.new_stars||0).toLocaleString()} Stars</div>
         <div><strong>变化量:</strong> ${d.diff > 0 ? '+' : ''}${(d.diff||0).toLocaleString()}</div>
       </div>`;
+    } else if (c.change_type === 'status_change') {
+      detailHTML = `<div class="change-expand" style="display:none;margin-top:6px;padding:8px 10px;background:rgba(255,255,255,.03);border-radius:4px;font-size:12px;line-height:1.8">
+        <div><strong>组件:</strong> ${d.component_name}</div>
+        <div><strong>原状态:</strong> ${d.old_status}</div>
+        <div><strong>新状态:</strong> ${d.new_status}</div>
+        <div><strong>检测时间:</strong> ${toBJ(c.timestamp)}</div>
+      </div>`;
+    } else if (c.change_type === 'new_incident') {
+      detailHTML = `<div class="change-expand" style="display:none;margin-top:6px;padding:8px 10px;background:rgba(255,255,255,.03);border-radius:4px;font-size:12px;line-height:1.8">
+        <div><strong>事件:</strong> ${d.title}</div>
+        <div><strong>影响级别:</strong> ${d.impact || '未知'}</div>
+        <div><strong>影响组件:</strong> ${(d.components || []).join(', ') || '未知'}</div>
+        <div><strong>检测时间:</strong> ${toBJ(c.timestamp)}</div>
+      </div>`
+      </div>`;
+    } else if (d.description || d.note) {
+      // 通用详情展开（适用于 new_feature, commit_change 等）
+      detailHTML = `<div class="change-expand" style="display:none;margin-top:6px;padding:8px 10px;background:rgba(255,255,255,.03);border-radius:4px;font-size:12px;line-height:1.8">
+        ${d.description ? `<div>${d.description}</div>` : ''}
+        ${d.note ? `<div style="color:var(--text-dim)">${d.note}</div>` : ''}
+        <div style="color:var(--text-dim);margin-top:4px">记录时间: ${toBJ(c.timestamp)}</div>
+      </div>`;
     }
 
     return `<div class="change-item" style="cursor:${detailHTML?'pointer':'default'}" ${detailHTML ? `onclick="this.querySelector('.change-expand').style.display=this.querySelector('.change-expand').style.display==='none'?'block':'none'"` : ''}>
@@ -751,9 +874,23 @@ async function loadEndpoints() {
     const tbody = document.getElementById('epBody');
     tbody.innerHTML = eps.map(e => {
       const isNew = prevSet.size > 0 && !prevSet.has(e);
-      return `<tr><td><code>${e}</code>${isNew ? ' <span style="color:var(--green);font-size:10px">NEW</span>' : ''}</td></tr>`;
+      const desc = API_ENDPOINT_DESC[e] || '';
+      const descId = 'ep-desc-' + e.replace(/\//g, '-').replace(/[^a-zA-Z0-9_-]/g, '');
+      return `<tr style="cursor:pointer" onclick="toggleEndpointDesc('${descId}')">
+        <td>
+          <code>${e}</code>${isNew ? ' <span style="color:var(--green);font-size:10px">NEW</span>' : ''}
+          ${desc ? `<div class="flag-desc" id="${descId}" style="display:none;margin-top:6px;padding:8px 10px;background:rgba(255,255,255,.03);border-radius:4px;font-size:12px;line-height:1.6;color:var(--text-dim)">${desc}</div>` : ''}
+        </td>
+      </tr>`;
     }).join('');
   } catch(e) { console.error('Endpoints failed:', e); }
+}
+
+function toggleEndpointDesc(id) {
+  const el = document.getElementById(id);
+  if (el) {
+    el.style.display = el.style.display === 'none' ? 'block' : 'none';
+  }
 }
 
 async function loadCdn() {
@@ -862,6 +999,75 @@ function exportReport() {
   window.open(API + '/api/export?days=7', '_blank');
 }
 
+async function loadStatusPage() {
+  try {
+    const data = await fetchJSON('/api/status_page');
+    const current = data.current;
+    const incidents = data.incidents || [];
+
+    document.getElementById('statusPageCount').textContent = incidents.length;
+
+    // 当前状态面板
+    const currentBody = document.getElementById('statusCurrentBody');
+    if (current && current.status) {
+      const statusMap = {
+        'operational': ['正常运行', 'var(--green)'],
+        'degraded_performance': ['性能下降', 'var(--orange)'],
+        'partial_outage': ['部分中断', 'var(--orange)'],
+        'major_outage': ['完全中断', 'var(--red)'],
+        'unknown': ['未知', 'var(--text-dim)'],
+      };
+      currentBody.innerHTML = Object.entries(current.status).map(([id, info]) => {
+        const [text, color] = statusMap[info.status] || [info.status, 'var(--text-dim)'];
+        return `<tr>
+          <td>${info.name || id}</td>
+          <td style="color:${color};font-weight:500">${text}</td>
+        </tr>`;
+      }).join('');
+
+      // 显示今日中断统计
+      if (current.outages && Object.keys(current.outages).length > 0) {
+        const outageText = Object.entries(current.outages).map(([k, v]) => {
+          const type = {'m': '完全中断', 'p': '部分中断', 'mi': '轻微中断'}[k] || k;
+          return `${type}: ${v}分钟`;
+        }).join('，');
+        currentBody.innerHTML += `<tr><td colspan="2" style="color:var(--text-dim);font-size:12px;padding-top:12px">今日统计: ${outageText}</td></tr>`;
+      }
+    } else {
+      currentBody.innerHTML = '<tr><td colspan="2" style="color:var(--text-dim)">暂无状态数据，点击「立即检查」获取</td></tr>';
+    }
+
+    // 事件历史面板
+    const incidentsBody = document.getElementById('statusIncidentsBody');
+    if (incidents.length) {
+      incidentsBody.innerHTML = incidents.map(inc => {
+        const impactColor = {
+          'critical': 'var(--red)',
+          'major': 'var(--red)',
+          'minor': 'var(--orange)',
+          'none': 'var(--text-dim)',
+        }[inc.impact] || 'var(--text-dim)';
+        const components = Array.isArray(inc.components) ? inc.components.join(', ') : '';
+        return `<tr>
+          <td style="font-size:12px">${inc.created_at ? toBJShort(inc.created_at) : '---'}</td>
+          <td>${inc.title || '---'}</td>
+          <td style="color:${impactColor};font-size:12px">${inc.impact || '---'}</td>
+          <td style="font-size:12px;color:var(--text-dim)">${components}</td>
+        </tr>`;
+      }).join('');
+    } else {
+      incidentsBody.innerHTML = '<tr><td colspan="4" style="color:var(--text-dim)">暂无事件记录</td></tr>';
+    }
+  } catch(e) { console.error('Status page failed:', e); }
+}
+
+function showStatusTab(tab, btn) {
+  document.querySelectorAll('#statusTabs button').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  document.getElementById('statusCurrentPanel').style.display = tab === 'current' ? '' : 'none';
+  document.getElementById('statusIncidentsPanel').style.display = tab === 'incidents' ? '' : 'none';
+}
+
 async function loadAll() {
   await Promise.all([
     loadStatus(),
@@ -872,6 +1078,7 @@ async function loadAll() {
     loadCdn(),
     loadLegal(),
     loadGithub(),
+    loadStatusPage(),
   ]);
 }
 

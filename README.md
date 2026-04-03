@@ -1,14 +1,16 @@
 # DeepSeek Monitor
 
-追踪 DeepSeek 网页端变化的监控系统。自动检测前端部署、Feature Flags 变化、API 端点增减和法律文档更新。
+追踪 DeepSeek 网页端变化的监控系统。自动检测前端部署、Feature Flags 变化、API 端点增减、法律文档更新、GitHub 开源动态和官方状态页面事件。
 
 ## 功能
 
 - **前端部署追踪** — 检测 commit-id、JS/CSS 文件 hash 变化
 - **Feature Flags 监控** — 提取 8+ 个远程功能开关，对比历史变化
-- **API 端点追踪** — 监控 36+ 个 `/api/v0/*` 端点的增减
+- **API 端点追踪** — 监控 36+ 个 `/api/v0/*` 端点的增减，支持点击查看详细说明
 - **CDN 资源追踪** — 监控 JS/CSS 上传时间和 ETag
 - **法律文档检测** — Terms of Use / Privacy Policy 更新预警
+- **GitHub 监控** — 追踪 deepseek-ai 组织的新仓库、代码推送、Release 发布
+- **Status Page 监控** — 监控 status.deepseek.com 的服务状态和故障事件
 - **Web Dashboard** — 暗色主题可视化面板，支持一键检查和报告导出
 
 ## 快速开始
@@ -136,6 +138,8 @@ crontab -e
 3. **Feature Flags** — JS 代码中 `getFeature("xxx", default)` 调用，由 `/api/v0/client/settings` 远程控制
 4. **CDN Last-Modified** — 华为云 CDN 的上传时间，所有文件同时更新 = 一次统一部署
 5. **法律文档** — 更新通常是重大变更的前兆（3月27日更新 → 3月29日宕机的先例）
+6. **GitHub 活动** — 监控 deepseek-ai 组织的仓库创建、代码推送、Release 发布
+7. **Status Page** — 爬取 status.deepseek.com 获取官方服务状态和故障事件
 
 ## 项目结构
 
@@ -146,6 +150,8 @@ deepseek-monitor/
 │   └── static/index.html   # Dashboard 前端页面
 ├── core/
 │   ├── frontend_monitor.py  # 前端资源监控器（核心模块）
+│   ├── github_monitor.py    # GitHub 监控器
+│   ├── status_monitor.py    # Status Page 监控器
 │   ├── config_monitor.py    # 配置监控器（需 Playwright）
 │   ├── behavior_monitor.py  # 行为监控器（需 Playwright）
 │   ├── storage.py           # SQLite 存储管理

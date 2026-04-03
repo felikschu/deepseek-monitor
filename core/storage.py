@@ -204,10 +204,38 @@ class StorageManager:
             )
         """)
 
+        # Status Page 监控相关表
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS status_snapshots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                status TEXT NOT NULL,
+                incidents TEXT,
+                uptime TEXT,
+                outages TEXT,
+                raw_data TEXT,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS status_incidents (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                incident_id TEXT NOT NULL UNIQUE,
+                title TEXT,
+                impact TEXT,
+                components TEXT,
+                status TEXT,
+                created_at TEXT,
+                resolved_at TEXT,
+                first_seen DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_changes_history_type ON changes_history(change_type)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_commit_history_id ON commit_history(commit_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_legal_docs_name ON legal_docs(doc_name)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_github_releases_repo ON github_releases(repo_name)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_status_incidents_id ON status_incidents(incident_id)")
 
         self.conn.commit()
 
@@ -728,6 +756,98 @@ class StorageManager:
             rows.append(r)
         return rows
 
+    # ── Status Page 监控方法 ──
+
+    async def save_status_snapshot(self, data: Dict):
+        """保存状态页面快照
+
+        Args:
+            data: 状态数据字典
+        """
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            INSERT INTO status_snapshots (status, incidents, uptime, outages, raw_data)
+            VALUES (?, ?, ?, ?, ?)
+        """, (
+            json.dumps(data.get("status", {}), ensure_ascii=False),
+            json.dumps(data.get("incidents", []), ensure_ascii=False),
+            json.dumps(data.get("uptime", {}), ensure_ascii=False),
+            json.dumps(data.get("outages", {}), ensure_ascii=False),
+            json.dumps(data.get("raw_data", {}), ensure_ascii=False),
+        ))
+        self.conn.commit()
+
+    async def get_last_status_snapshot(self) -> Optional[Dict]:
+        """获取最近的状态页面快照"""
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            SELECT status, incidents, uptime, outages, timestamp
+            FROM status_snapshots
+            ORDER BY timestamp DESC LIMIT 1
+        """)
+        row = cursor.fetchone()
+        if not row:
+            return None
+        return {
+            "status": json.loads(row["status"]),
+            "incidents": json.loads(row["incidents"]),
+            "uptime": json.loads(row["uptime"]),
+            "outages": json.loads(row["outages"]),
+            "timestamp": row["timestamp"],
+        }
+
+    async def save_status_incident(self, incident: Dict):
+        """保存状态页面事件
+
+        Args:
+            incident: 事件字典
+        """
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            INSERT OR IGNORE INTO status_incidents
+            (incident_id, title, impact, components, status, created_at, resolved_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (
+            incident.get("id", ""),
+            incident.get("title", ""),
+            incident.get("impact", ""),
+            json.dumps(incident.get("components", []), ensure_ascii=False),
+            incident.get("status", ""),
+            incident.get("created_at", ""),
+            incident.get("resolved_at", ""),
+        ))
+        self.conn.commit()
+
+    async def get_status_incidents(self, days: int = 30) -> List[Dict]:
+        """获取状态页面事件历史
+
+        Args:
+            days: 天数
+
+        Returns:
+            事件列表
+        """
+        cursor = self.conn.cursor()
+        cutoff_date = datetime.now() - timedelta(days=days)
+
+        cursor.execute("""
+            SELECT incident_id, title, impact, components, status, created_at, resolved_at, first_seen
+            FROM status_incidents
+            WHERE first_seen >= ?
+            ORDER BY created_at DESC
+        """, (cutoff_date,))
+
+        incidents = []
+        for row in cursor.fetchall():
+            inc = dict(row)
+            try:
+                inc["components"] = json.loads(inc["components"])
+            except (json.JSONDecodeError, TypeError):
+                pass
+            incidents.append(inc)
+
+        return incidents
+
     async def cleanup_old_data(self, retention_days: int = 90):
         """清理旧数据
 
@@ -752,6 +872,7 @@ class StorageManager:
             "legal_docs",
             "cdn_resources",
             "github_snapshots",
+            "status_snapshots",
         ]
 
         for table in tables:
