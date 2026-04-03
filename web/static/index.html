@@ -213,13 +213,13 @@ tr:hover td{background:rgba(255,255,255,.03)}
         <button onclick="showStatusTab('incidents',this)">事件历史</button>
       </div>
     </h2>
-    <div id="statusCurrentPanel">
+    <div id="statusCurrentPanel" style="max-height:300px;overflow-y:auto">
       <table>
         <thead><tr><th>服务组件</th><th>状态</th></tr></thead>
         <tbody id="statusCurrentBody"></tbody>
       </table>
     </div>
-    <div id="statusIncidentsPanel" style="display:none">
+    <div id="statusIncidentsPanel" style="display:none;max-height:300px;overflow-y:auto">
       <table>
         <thead><tr><th>时间</th><th>事件</th><th>影响</th><th>组件</th></tr></thead>
         <tbody id="statusIncidentsBody"></tbody>
@@ -1008,7 +1008,7 @@ async function loadStatusPage() {
 
     // 当前状态面板
     const currentBody = document.getElementById('statusCurrentBody');
-    if (current && current.status) {
+    if (current && current.components && current.components.length > 0) {
       const statusMap = {
         'operational': ['正常运行', 'var(--green)'],
         'degraded_performance': ['性能下降', 'var(--orange)'],
@@ -1016,22 +1016,13 @@ async function loadStatusPage() {
         'major_outage': ['完全中断', 'var(--red)'],
         'unknown': ['未知', 'var(--text-dim)'],
       };
-      currentBody.innerHTML = Object.entries(current.status).map(([id, info]) => {
-        const [text, color] = statusMap[info.status] || [info.status, 'var(--text-dim)'];
+      currentBody.innerHTML = current.components.map(comp => {
+        const [text, color] = statusMap[comp.status] || [comp.status, 'var(--text-dim)'];
         return `<tr>
-          <td>${info.name || id}</td>
+          <td>${comp.name || comp.id}</td>
           <td style="color:${color};font-weight:500">${text}</td>
         </tr>`;
       }).join('');
-
-      // 显示今日中断统计
-      if (current.outages && Object.keys(current.outages).length > 0) {
-        const outageText = Object.entries(current.outages).map(([k, v]) => {
-          const type = {'m': '完全中断', 'p': '部分中断', 'mi': '轻微中断'}[k] || k;
-          return `${type}: ${v}分钟`;
-        }).join('，');
-        currentBody.innerHTML += `<tr><td colspan="2" style="color:var(--text-dim);font-size:12px;padding-top:12px">今日统计: ${outageText}</td></tr>`;
-      }
     } else {
       currentBody.innerHTML = '<tr><td colspan="2" style="color:var(--text-dim)">暂无状态数据，点击「立即检查」获取</td></tr>';
     }
@@ -1046,11 +1037,24 @@ async function loadStatusPage() {
           'minor': 'var(--orange)',
           'none': 'var(--text-dim)',
         }[inc.impact] || 'var(--text-dim)';
+        const impactText = {
+          'critical': '严重',
+          'major': '重大',
+          'minor': '轻微',
+          'none': '无',
+        }[inc.impact] || inc.impact || '未知';
         const components = Array.isArray(inc.components) ? inc.components.join(', ') : '';
+        // 处理日期显示
+        let dateStr = '---';
+        if (inc.date) {
+          dateStr = inc.date;
+        } else if (inc.year && inc.month) {
+          dateStr = `${inc.year} ${inc.month}`;
+        }
         return `<tr>
-          <td style="font-size:12px">${inc.created_at ? toBJShort(inc.created_at) : '---'}</td>
-          <td>${inc.title || '---'}</td>
-          <td style="color:${impactColor};font-size:12px">${inc.impact || '---'}</td>
+          <td style="font-size:12px;white-space:nowrap">${dateStr}</td>
+          <td style="font-size:12px">${inc.name || '---'}</td>
+          <td style="color:${impactColor};font-size:12px;white-space:nowrap">${impactText}</td>
           <td style="font-size:12px;color:var(--text-dim)">${components}</td>
         </tr>`;
       }).join('');

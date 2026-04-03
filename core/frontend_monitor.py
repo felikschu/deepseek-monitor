@@ -447,6 +447,8 @@ class FrontendMonitor:
                 js_content = await response.text()
 
             endpoints = sorted(set(re.findall(r'"/api/v0/[^"]*"', js_content)))
+            # 去掉双引号
+            endpoints = [ep.strip('"') for ep in endpoints]
             self.results["api_endpoints"] = endpoints
             logger.info(f"  提取到 {len(endpoints)} 个 API 端点")
 
