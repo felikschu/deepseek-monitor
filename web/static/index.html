@@ -1044,16 +1044,29 @@ async function loadStatusPage() {
           'none': '无',
         }[inc.impact] || inc.impact || '未知';
         const components = Array.isArray(inc.components) ? inc.components.join(', ') : '';
-        // 处理日期显示
-        let dateStr = '---';
-        if (inc.date) {
-          dateStr = inc.date;
-        } else if (inc.year && inc.month) {
-          dateStr = `${inc.year} ${inc.month}`;
+        
+        // 格式化时间线
+        let timelineHtml = '';
+        if (inc.timeline && inc.timeline.length > 0) {
+          const startTime = inc.timeline[inc.timeline.length - 1]?.time || '';
+          const endTime = inc.timeline[0]?.time || '';
+          timelineHtml = `<div style="font-size:11px;color:var(--text-dim);margin-top:4px">${startTime} → ${endTime}</div>`;
+        } else if (inc.published) {
+          // 使用 published 时间
+          const pubDate = new Date(inc.published);
+          timelineHtml = `<div style="font-size:11px;color:var(--text-dim);margin-top:4px">${pubDate.toLocaleString('zh-CN')}</div>`;
         }
-        return `<tr>
-          <td style="font-size:12px;white-space:nowrap">${dateStr}</td>
-          <td style="font-size:12px">${inc.name || '---'}</td>
+        
+        return `<tr style="cursor:pointer" onclick="toggleIncidentDetail('${inc.id}')">
+          <td style="font-size:12px;white-space:nowrap">${inc.published ? new Date(inc.published).toLocaleDateString('zh-CN') : '---'}</td>
+          <td style="font-size:12px">
+            ${inc.name || '---'}
+            ${timelineHtml}
+            <div id="inc-detail-${inc.id}" style="display:none;margin-top:8px;padding:8px;background:rgba(255,255,255,.05);border-radius:4px;font-size:11px;line-height:1.6">
+              ${inc.timeline ? inc.timeline.map(t => `<div><strong>${t.time}</strong> ${t.status}${t.description ? ': ' + t.description : ''}</div>`).join('') : ''}
+              ${inc.link ? `<div style="margin-top:4px"><a href="${inc.link}" target="_blank" style="color:var(--accent)">查看详情</a></div>` : ''}
+            </div>
+          </td>
           <td style="color:${impactColor};font-size:12px;white-space:nowrap">${impactText}</td>
           <td style="font-size:12px;color:var(--text-dim)">${components}</td>
         </tr>`;
@@ -1062,6 +1075,13 @@ async function loadStatusPage() {
       incidentsBody.innerHTML = '<tr><td colspan="4" style="color:var(--text-dim)">暂无事件记录</td></tr>';
     }
   } catch(e) { console.error('Status page failed:', e); }
+}
+
+function toggleIncidentDetail(id) {
+  const el = document.getElementById('inc-detail-' + id);
+  if (el) {
+    el.style.display = el.style.display === 'none' ? 'block' : 'none';
+  }
 }
 
 function showStatusTab(tab, btn) {

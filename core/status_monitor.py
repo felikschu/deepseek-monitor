@@ -3,24 +3,27 @@ Status Page 监控模块
 
 监控 status.deepseek.com 官方状态页面：
 1. 获取实时服务状态
-2. 追踪宕机事件
+2. 追踪宕机事件（包含详细时间）
 3. 统计可用性数据
 4. 检测新的故障事件
 
-API Endpoint: https://status.deepseek.com/history.json
+API Endpoint: https://status.deepseek.com/history.atom
 """
 
-import json
 import re
 from datetime import datetime
 from typing import Dict, List, Any, Optional
+from xml.etree import ElementTree as ET
 
 import aiohttp
 from loguru import logger
 
 
 STATUS_PAGE_URL = "https://status.deepseek.com"
-STATUS_API_URL = "https://status.deepseek.com/history.json"
+STATUS_FEED_URL = "https://status.deepseek.com/history.atom"
+
+# 命名空间
+ATOM_NS = {"atom": "http://www.w3.org/2005/Atom"}
 
 
 class StatusMonitor:
@@ -32,7 +35,6 @@ class StatusMonitor:
         self.session = None
         self.results = {
             "timestamp": None,
-            "changes": [],
             "components": [],
             "incidents": [],
         }
@@ -42,7 +44,7 @@ class StatusMonitor:
             timeout = aiohttp.ClientTimeout(total=30)
             headers = {
                 "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
-                "Accept": "application/json",
+                "Accept": "application/atom+xml",
             }
             self.session = aiohttp.ClientSession(timeout=timeout, headers=headers)
         return self.session
@@ -55,22 +57,22 @@ class StatusMonitor:
         try:
             session = await self._get_session()
 
-            # 获取状态页面数据
-            status_data = await self._fetch_status_data(session)
-            if not status_data:
+            # 获取 Atom Feed
+            feed_data = await self._fetch_feed(session)
+            if not feed_data:
                 logger.warning("无法获取状态页面数据")
                 return self.results
 
-            # 1. 解析组件状态
-            await self._parse_components(status_data)
+            # 解析事件
+            await self._parse_incidents(feed_data)
 
-            # 2. 解析事件历史
-            await self._parse_incidents(status_data)
+            # 获取组件状态（从页面 HTML）
+            await self._fetch_components(session)
 
-            # 3. 保存快照
+            # 保存快照
             await self._save_snapshot()
 
-            # 4. 检测变化
+            # 检测变化
             await self._detect_changes()
 
         except Exception as e:
@@ -79,70 +81,153 @@ class StatusMonitor:
 
         return self.results
 
-    async def _fetch_status_data(self, session: aiohttp.ClientSession) -> Optional[Dict]:
-        """获取状态页面数据"""
+    async def _fetch_feed(self, session: aiohttp.ClientSession) -> Optional[str]:
+        """获取 Atom Feed"""
         try:
-            async with session.get(STATUS_API_URL) as resp:
+            async with session.get(STATUS_FEED_URL) as resp:
                 if resp.status != 200:
-                    logger.warning(f"Status API 返回 {resp.status}")
+                    logger.warning(f"Status Feed 返回 {resp.status}")
                     return None
-                return await resp.json()
+                return await resp.text()
         except Exception as e:
-            logger.error(f"获取状态数据失败: {e}")
+            logger.error(f"获取 Feed 失败: {e}")
             return None
 
-    async def _parse_components(self, data: Dict):
-        """解析组件状态"""
-        logger.info("解析组件状态...")
+    async def _fetch_components(self, session: aiohttp.ClientSession):
+        """获取组件状态"""
+        try:
+            async with session.get(STATUS_PAGE_URL) as resp:
+                if resp.status == 200:
+                    html = await resp.text()
+                    # 简单提取组件状态
+                    # 查找类似：{"name":"API Service","status":"operational"}
+                    pattern = r'"name":"([^"]+)","status":"([^"]+)"'
+                    matches = re.findall(pattern, html)
+                    
+                    components = []
+                    for name, status in matches[:5]:  # 限制数量避免重复
+                        if any(c["name"] == name for c in components):
+                            continue
+                        components.append({
+                            "id": name.lower().replace(" ", "_"),
+                            "name": name,
+                            "status": status,
+                        })
+                    
+                    if components:
+                        self.results["components"] = components
+                        logger.info(f"检测到 {len(components)} 个组件")
+        except Exception as e:
+            logger.warning(f"获取组件状态失败: {e}")
 
-        components = data.get("components", [])
-        parsed_components = []
-
-        for comp in components:
-            parsed = {
-                "id": comp.get("id"),
-                "name": comp.get("name"),
-                "status": comp.get("status"),  # operational, degraded_performance, partial_outage, major_outage
-                "description": comp.get("description"),
-            }
-            parsed_components.append(parsed)
-
-        self.results["components"] = parsed_components
-        logger.info(f"  检测到 {len(parsed_components)} 个组件")
-
-    async def _parse_incidents(self, data: Dict):
-        """解析事件历史"""
+    async def _parse_incidents(self, feed_xml: str):
+        """解析 Atom Feed 中的事件"""
         logger.info("解析事件历史...")
 
-        # 从 months 中提取事件
-        months = data.get("months", [])
-        all_incidents = []
+        try:
+            root = ET.fromstring(feed_xml.encode("utf-8"))
+            entries = root.findall("atom:entry", ATOM_NS)
 
-        for month_data in months:
-            month_name = month_data.get("name")
-            year = month_data.get("year")
-            incidents = month_data.get("incidents", [])
+            incidents = []
+            for entry in entries:
+                # 提取基本信息
+                title_elem = entry.find("atom:title", ATOM_NS)
+                title = title_elem.text if title_elem is not None else ""
 
-            for inc in incidents:
-                parsed = {
-                    "id": inc.get("id"),
-                    "name": inc.get("name"),
-                    "status": inc.get("status"),
-                    "impact": inc.get("impact"),  # minor, major, critical
-                    "date": inc.get("date"),
-                    "year": year,
-                    "month": month_name,
-                    "created_at": inc.get("created_at"),
-                    "resolved_at": inc.get("resolved_at"),
-                    "components": [c.get("name") for c in inc.get("components", [])],
+                published_elem = entry.find("atom:published", ATOM_NS)
+                published = published_elem.text if published_elem is not None else ""
+
+                updated_elem = entry.find("atom:updated", ATOM_NS)
+                updated = updated_elem.text if updated_elem is not None else ""
+
+                link_elem = entry.find("atom:link", ATOM_NS)
+                link = link_elem.get("href", "") if link_elem is not None else ""
+
+                content_elem = entry.find("atom:content", ATOM_NS)
+                content = content_elem.text if content_elem is not None else ""
+
+                # 从内容中提取时间线
+                timeline = self._parse_timeline(content)
+
+                # 判断影响级别
+                impact = self._determine_impact(title, content)
+
+                # 提取组件
+                components = self._extract_components(title, content)
+
+                incident = {
+                    "id": link.split("/")[-1] if "/" in link else "",
+                    "name": title,
+                    "impact": impact,
+                    "published": published,
+                    "updated": updated,
+                    "link": link,
+                    "timeline": timeline,
+                    "components": components,
                 }
-                all_incidents.append(parsed)
+                incidents.append(incident)
 
-        # 按日期排序（最新的在前）
-        all_incidents.sort(key=lambda x: x.get("date") or "", reverse=True)
+            self.results["incidents"] = incidents
+            logger.info(f"发现 {len(incidents)} 个事件")
 
-        self.results["incidents"] = all_incidents
-        logger.info(f"  发现 {len(all_incidents)} 个事件")
+        except Exception as e:
+            logger.error(f"解析 Feed 失败: {e}")
+
+    def _parse_timeline(self, content: str) -> List[Dict]:
+        """从 HTML 内容中提取时间线"""
+        timeline = []
+        
+        if not content:
+            return timeline
+
+        # 首先移除 <var> 标签，保留内容
+        # 格式: <var data-var='date'> 3</var> -> 3
+        content_cleaned = re.sub(r'<var[^>]*>([^<]*)</var>', r'\1', content)
+
+        # 解析 <p><small>...</small><br><strong>...</strong>...</p> 格式
+        # 例如: <p><small>Apr  3, 16:50 CST</small><br><strong>Resolved</strong> - This incident...</p>
+        pattern = r'<small>([^<]+)</small>\s*<br\s*/?>\s*<strong>([^<]+)</strong>\s*-?\s*([^<]*)'
+        matches = re.findall(pattern, content_cleaned)
+
+        for time_str, status, description in matches:
+            timeline.append({
+                "time": time_str.strip(),
+                "status": status.strip(),
+                "description": description.strip() if description else "",
+            })
+
+        return timeline
+
+    def _determine_impact(self, title: str, content: str) -> str:
+        """判断事件影响级别"""
+        title_lower = title.lower()
+        content_lower = content.lower() if content else ""
+
+        if "不可用" in title or "not available" in title_lower:
+            return "critical"
+        elif "严重" in title or "critical" in content_lower:
+            return "critical"
+        elif "重大" in title or "major" in content_lower:
+            return "major"
+        elif "性能异常" in title or "degraded" in title_lower:
+            return "minor"
+        elif "轻微" in title or "minor" in content_lower:
+            return "minor"
+        else:
+            return "minor"
+
+    def _extract_components(self, title: str, content: str) -> List[str]:
+        """提取受影响的组件"""
+        components = []
+        
+        if "网页" in title or "Web" in title:
+            components.append("网页对话服务")
+        if "API" in title:
+            components.append("API服务")
+        if "APP" in title or "App" in title:
+            components.append("移动应用")
+
+        return components if components else ["未知"]
 
     async def _save_snapshot(self):
         """保存状态快照"""
@@ -193,7 +278,7 @@ class StatusMonitor:
                     "title": inc.get("name"),
                     "impact": inc.get("impact"),
                     "components": inc.get("components", []),
-                    "date": inc.get("date"),
+                    "published": inc.get("published"),
                     "detected_at": datetime.utcnow().isoformat(),
                 }
                 self.results["changes"].append(change)
