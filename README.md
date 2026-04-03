@@ -13,16 +13,23 @@
 
 ## 快速开始
 
-### 1. 安装依赖
-
-```bash
-pip install aiohttp loguru pyyaml beautifulsoup4
-```
-
-### 2. 启动 Dashboard
+### 1. 下载并安装
 
 ```bash
 git clone https://github.com/felikschu/deepseek-monitor.git
+cd deepseek-monitor
+
+# 一键安装（安装依赖 + 创建桌面快捷方式）
+bash scripts/setup.sh
+```
+
+### 2. 启动
+
+**macOS**: 双击桌面的 `DeepSeek Monitor.command`（安装脚本自动创建）
+
+**手动启动**:
+
+```bash
 cd deepseek-monitor
 python3 web/server.py
 ```
