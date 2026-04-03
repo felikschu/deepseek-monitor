@@ -54,6 +54,7 @@ tr:hover td{background:rgba(255,255,255,.03)}
 .change-detail .title{font-weight:500;font-size:13px}
 .change-detail .meta{font-size:11px;color:var(--text-dim);margin-top:2px}
 .change-detail .diff{font-family:'SF Mono',monospace;font-size:11px;color:var(--orange);margin-top:4px;word-break:break-all}
+.change-expand{cursor:default}
 .flag-table td:nth-child(2){font-family:'SF Mono',monospace;font-size:12px}
 .flag-new{color:var(--green);font-weight:600}
 .endpoint-list{max-height:300px;overflow-y:auto}
@@ -617,6 +618,7 @@ function renderChanges(changes) {
     const d = c.change_data || {};
     let title = c.change_type;
     let diff = '';
+    let metaTime = '';
     switch(c.change_type) {
       case 'resource_change':
         title = `${d.filename || d.resource_type} hash 变化`;
@@ -627,13 +629,13 @@ function renderChanges(changes) {
         diff = d.hash ? `hash: ${d.hash?.slice(0,16)}...` : '';
         break;
       case 'commit_change':
-        title = `commit 变化: ${d.old_commit?.slice(0,8)} → ${d.new_commit?.slice(0,8)}`;
+        title = `前端部署: ${d.old_commit?.slice(0,8)} → ${d.new_commit?.slice(0,8)}`;
         break;
       case 'feature_flags_change':
         const added = (d.added||[]).join(', ');
         const removed = (d.removed||[]).join(', ');
         const changed = Object.entries(d.changed||{}).map(([k,v])=>`${k}`).join(', ');
-        title = 'Flags 变化';
+        title = 'Feature Flags 变化';
         if (added) title += ` +${added}`;
         if (removed) title += ` -${removed}`;
         if (changed) title += ` ~${changed}`;
@@ -660,28 +662,68 @@ function renderChanges(changes) {
         break;
       case 'new_repo':
         title = `新仓库: ${d.repo_name}`;
-        diff = d.description || '';
+        diff = d.description ? `描述: ${d.description}` : '';
         break;
       case 'repo_push':
-        title = `仓库更新: ${d.repo_name}`;
-        diff = `推送时间: ${toBJ(d.new_pushed)}`;
+        title = `${d.repo_name} 有新提交`;
+        diff = d.repo_url ? `<a href="${d.repo_url}/commits" target="_blank" style="color:var(--accent)">查看 commits</a>` : '';
         break;
       case 'new_release':
-        title = `新 Release: ${d.repo_name} ${d.tag}`;
-        diff = d.title || d.tag;
+        title = `${d.repo_name} 发布 ${d.tag}`;
+        diff = d.title && d.title !== d.tag ? d.title : '';
+        // 用 published_at 作为主要显示时间
+        metaTime = d.published_at ? `发布于 ${toBJ(d.published_at)}` : '';
         break;
       case 'stars_change':
-        title = `Star 变化: ${d.repo_name}`;
+        title = `${d.repo_name} Star 数变化`;
         diff = `${(d.old_stars||0).toLocaleString()} → ${(d.new_stars||0).toLocaleString()} (${d.diff > 0 ? '+' : ''}${(d.diff||0).toLocaleString()})`;
         break;
     }
 
-    return `<div class="change-item">
+    const metaLine = metaTime || toBJ(c.timestamp);
+    // 构建详情 HTML（点击展开）
+    let detailHTML = '';
+    if (c.change_type === 'new_release') {
+      const relUrl = d.url ? `<a href="${d.url}" target="_blank" style="color:var(--accent)">GitHub Release 页面</a>` : '';
+      detailHTML = `<div class="change-expand" style="display:none;margin-top:6px;padding:8px 10px;background:rgba(255,255,255,.03);border-radius:4px;font-size:12px;line-height:1.8">
+        <div><strong>仓库:</strong> <a href="${d.repo_url||'#'}" target="_blank" style="color:var(--accent)">${d.repo_name}</a></div>
+        <div><strong>Tag:</strong> ${d.tag}</div>
+        ${d.title && d.title !== d.tag ? `<div><strong>标题:</strong> ${d.title}</div>` : ''}
+        ${d.published_at ? `<div><strong>发布时间:</strong> ${toBJ(d.published_at)}</div>` : ''}
+        <div><strong>检测时间:</strong> ${toBJ(c.timestamp)}</div>
+        ${relUrl ? `<div>${relUrl}</div>` : ''}
+      </div>`;
+    } else if (c.change_type === 'new_repo') {
+      detailHTML = `<div class="change-expand" style="display:none;margin-top:6px;padding:8px 10px;background:rgba(255,255,255,.03);border-radius:4px;font-size:12px;line-height:1.8">
+        <div><strong>仓库:</strong> <a href="${d.repo_url||'#'}" target="_blank" style="color:var(--accent)">${d.repo_name}</a></div>
+        ${d.description ? `<div><strong>描述:</strong> ${d.description}</div>` : ''}
+        ${d.stars ? `<div><strong>Stars:</strong> ${d.stars.toLocaleString()}</div>` : ''}
+        ${d.created_at ? `<div><strong>创建时间:</strong> ${toBJ(d.created_at)}</div>` : ''}
+        <div><strong>检测时间:</strong> ${toBJ(c.timestamp)}</div>
+      </div>`;
+    } else if (c.change_type === 'repo_push') {
+      detailHTML = `<div class="change-expand" style="display:none;margin-top:6px;padding:8px 10px;background:rgba(255,255,255,.03);border-radius:4px;font-size:12px;line-height:1.8">
+        <div><strong>仓库:</strong> <a href="${d.repo_url||'#'}" target="_blank" style="color:var(--accent)">${d.repo_name}</a></div>
+        <div><strong>上次推送:</strong> ${toBJ(d.old_pushed)}</div>
+        <div><strong>本次推送:</strong> ${toBJ(d.new_pushed)}</div>
+        ${d.repo_url ? `<div><a href="${d.repo_url}/commits" target="_blank" style="color:var(--accent)">查看 commit 历史</a></div>` : ''}
+      </div>`;
+    } else if (c.change_type === 'stars_change') {
+      detailHTML = `<div class="change-expand" style="display:none;margin-top:6px;padding:8px 10px;background:rgba(255,255,255,.03);border-radius:4px;font-size:12px;line-height:1.8">
+        <div><strong>仓库:</strong> ${d.repo_name}</div>
+        <div><strong>变化前:</strong> ${(d.old_stars||0).toLocaleString()} Stars</div>
+        <div><strong>变化后:</strong> ${(d.new_stars||0).toLocaleString()} Stars</div>
+        <div><strong>变化量:</strong> ${d.diff > 0 ? '+' : ''}${(d.diff||0).toLocaleString()}</div>
+      </div>`;
+    }
+
+    return `<div class="change-item" style="cursor:${detailHTML?'pointer':'default'}" ${detailHTML ? `onclick="this.querySelector('.change-expand').style.display=this.querySelector('.change-expand').style.display==='none'?'block':'none'"` : ''}>
       <div class="change-icon ${cls}">${icon}</div>
       <div class="change-detail">
         <div class="title">${title}</div>
-        <div class="meta">${toBJ(c.timestamp)}</div>
+        <div class="meta">${metaLine}</div>
         ${diff ? `<div class="diff">${diff}</div>` : ''}
+        ${detailHTML}
       </div>
     </div>`;
   }).join('');
