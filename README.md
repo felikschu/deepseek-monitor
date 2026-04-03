@@ -21,18 +21,10 @@ pip install aiohttp loguru pyyaml beautifulsoup4
 
 ### 2. 启动 Dashboard
 
-**macOS**: 双击桌面的 `DeepSeek Monitor.command`
-
-**或手动运行**:
-
 ```bash
-cd deepseek_monitor
-
-# 启动 Dashboard（推荐）
+git clone https://github.com/felikschu/deepseek-monitor.git
+cd deepseek-monitor
 python3 web/server.py
-
-# 或命令行检查
-python3 scripts/monitor.py --mode frontend
 ```
 
 打开 http://localhost:8765 查看 Dashboard。
@@ -40,60 +32,129 @@ python3 scripts/monitor.py --mode frontend
 ### 3. 设置定时检查
 
 ```bash
-# crontab -e
+crontab -e
 # 每3小时自动检查一次
-0 */3 * * * cd /path/to/deepseek_monitor && python3 scripts/monitor.py --mode frontend >> logs/cron.log 2>&1
+0 */3 * * * cd /path/to/deepseek-monitor && python3 scripts/monitor.py --mode frontend >> logs/cron.log 2>&1
 ```
 
-## Dashboard 说明
+## 已发现的真实事件
 
-Dashboard 包含 6 个模块，每个模块右上角有 `?` 按钮可以查看详细说明：
+以下是通过本系统追踪到的 DeepSeek 网页端变化，所有结论均基于技术证据（HTTP 响应头、JS 代码分析、status.deepseek.com 官方数据）：
 
-| 模块 | 说明 |
-|------|------|
-| 事件时间线 | 按天显示变化数量的折线图 |
-| Feature Flags | 远程功能开关列表及变化状态 |
-| CDN 资源 | JS/CSS 文件的上传时间和大小 |
-| 变更记录 | 所有检测到的变化，可按类型过滤 |
-| API 端点 | 前端调用的所有后端接口 |
-| 法律文档 | 使用条款和隐私政策的更新记录 |
+### 2026年3月27日 — 法律文档更新
 
-所有时间均显示为北京时间（UTC+8）。
+- **证据**: CDN HTTP `Last-Modified` 响应头
+- Terms of Use 和 Privacy Policy 同时更新至 `2026-03-27 03:50:07 GMT`（北京时间 11:50:07）
+- 两份文档修改时间精确到秒一致，说明是统一操作
+- **意义**: 法律文档更新通常预示重大产品变更
+
+### 2026年3月29日 — 模型静默升级 + 13小时宕机
+
+- **证据**: status.deepseek.com uptimeData JSON、用户报告（掘金、知乎、搜狐、新浪等）
+- 网页/APP 服务从 29日 21:35 开始异常，持续到 30日 10:33 修复（近 13 小时）
+- 事件代号: `v5mmslnf9249`
+- **用户观察到的变化**（宕机前）:
+  - 模型自报身份从"纯文字AI助手"变为明确的"DeepSeek-V3模型"
+  - 知识截止日期从 2025年初 更新到 2026年1月（能回答2025美国大选结果）
+  - SVG 生成和代码生成能力显著提升
+- **宕机后回退**: 修复后知识截止日期恢复为 2025年5月，自我介绍不再提及版本号
+- 这暗示灰度部署了新模型但出了问题，随后被回退
+
+### 2026年3月30日 — 第二轮宕机（7+ 小时）
+
+- **证据**: status.deepseek.com — `outages: {m: 26023}` ≈ 433 分钟完全中断
+- 事件代号: `rjs0ljjlqhsw`
+- 3月29日故障修复后不久再次崩溃
+- DeepSeek 网页端史上最长单日中断记录
+
+### 2026年3月31日 — 第三轮故障
+
+- **证据**: status.deepseek.com — API 33分钟部分中断 + 网页 30分钟完全中断
+- 三天连续故障的最后一天
+
+### 2026年4月1日 — 前端代码提交
+
+- **证据**: 生产 JS 内嵌元数据 `commit_datetime:"2026/04/01 21:01:36"`
+- commit-id: `1fcf6559`
+- 前端包版本: `@deepseek/chat` v1.5.8
+- API 版本: v1.7.1
+- 此为宕机修复后的代码提交
+
+### 2026年4月3日 — CDN 新部署
+
+- **证据**: CDN HTTP `Last-Modified` 响应头
+- 所有 CDN 静态文件统一更新至 `2026-04-03 08:20:13 GMT`（北京时间 16:20:13）
+- 三个文件（main.js 1.1MB、main.css 221KB、vendors.js 679KB）的修改时间精确到秒一致
+- status.deepseek.com 记录了 103 秒轻微中断
+
+### 已删除的测试版本
+
+- `main.6184d0a79e.js` 在 CDN 上返回 404（`x-amz-error-code: NoSuchKey`）
+- 此版本包含**三模式切换 UI** 代码（快速模式/专家模式/多模态模式），当前生产版为两开关模式（DeepThink + Search）
+- 上线时间未知，已被删除
+
+### 宕机后新增的功能
+
+通过对比当前 JS 代码（commit `1fcf6559`）识别到以下新增 feature flags：
+
+| Flag | 默认值 | 说明 |
+|------|--------|------|
+| `sse_auto_resume_timeout` | 2000ms | SSE 流式响应断线自动重连（新功能） |
+| `session_prefetch` | true | 会话预加载加速（新功能） |
+| `pow_prefetch` | false | PoW 反滥用预取（新功能） |
+| `chat_hcaptcha` | false | 海外人机验证码（新功能） |
+| `allow_file_with_search` | false | 搜索时允许上传文件（新功能） |
+| `launch_clean_session_interval_seconds` | 21600 | 6小时自动清理会话 |
+
+### 故障统计
+
+| 日期 | 中断时长 | 类型 | 严重度 |
+|------|---------|------|--------|
+| 3/5 | 40分钟 | 完全中断 | 一般 |
+| 3/10 | 33分钟 | 部分中断 | 一般 |
+| 3/18 | - | 性能异常 | 一般 |
+| 3/29 | ~13小时 | 重大故障 | 严重 |
+| 3/30 | 7.2小时 | 重大故障 | 严重 |
+| 3/31 | ~1小时 | 部分+完全 | 一般 |
+| 4/3 | 2分钟 | 轻微异常 | 轻微 |
+
+3月网页端整体可用性: ~98.61%（来自 status.deepseek.com）
 
 ## 追踪原理
 
-系统通过以下信号检测 DeepSeek 网页端变化：
+系统通过以下信号检测变化：
 
 1. **commit-id** — HTML 中 `<meta name="commit-id">` 的值，每次部署都会变
 2. **JS 文件 hash** — CDN 文件名中的 hash（如 `main.cd620c850b.js`），hash 变 = 内容变
-3. **Feature Flags** — JS 代码中 `getFeature("xxx", default)` 调用，由服务端远程控制
-4. **CDN Last-Modified** — 文件上传时间，所有文件同时更新 = 一次统一部署
-5. **法律文档** — 更新通常是重大变更的前兆
+3. **Feature Flags** — JS 代码中 `getFeature("xxx", default)` 调用，由 `/api/v0/client/settings` 远程控制
+4. **CDN Last-Modified** — 华为云 CDN 的上传时间，所有文件同时更新 = 一次统一部署
+5. **法律文档** — 更新通常是重大变更的前兆（3月27日更新 → 3月29日宕机的先例）
 
 ## 项目结构
 
 ```
-deepseek_monitor/
+deepseek-monitor/
 ├── web/
-│   ├── server.py          # Dashboard Web 服务器
-│   └── static/index.html  # Dashboard 前端页面
+│   ├── server.py           # Dashboard Web 服务器（端口 8765）
+│   └── static/index.html   # Dashboard 前端页面
 ├── core/
-│   ├── frontend_monitor.py # 前端资源监控器
-│   ├── config_monitor.py   # 配置监控器（需 Playwright）
-│   ├── behavior_monitor.py # 行为监控器（需 Playwright）
-│   ├── storage.py          # SQLite 存储管理
-│   ├── alerter.py          # 告警模块
-│   └── reporter.py         # 报告生成
+│   ├── frontend_monitor.py  # 前端资源监控器（核心模块）
+│   ├── config_monitor.py    # 配置监控器（需 Playwright）
+│   ├── behavior_monitor.py  # 行为监控器（需 Playwright）
+│   ├── storage.py           # SQLite 存储管理
+│   ├── alerter.py           # 告警模块
+│   └── reporter.py          # 报告生成
 ├── utils/
-│   ├── config.py           # 配置加载
-│   ├── diff_utils.py       # 差异比较工具
-│   └── hash_utils.py       # Hash 工具
+│   ├── config.py            # 配置加载
+│   ├── diff_utils.py        # 差异比较工具
+│   └── hash_utils.py        # Hash 工具
 ├── scripts/
-│   ├── monitor.py          # 命令行入口
-│   └── start_dashboard.sh  # Dashboard 启动脚本
-├── config.yaml             # 配置文件
-├── CHANGELOG.md            # 变更记录（已发现的 DeepSeek 变化）
-└── requirements.txt        # Python 依赖
+│   ├── monitor.py           # 命令行入口
+│   └── start_dashboard.sh   # Dashboard 启动脚本
+├── config.yaml              # 配置文件
+├── CHANGELOG.md             # 详细变更记录
+├── ARCHITECTURE.md          # 系统架构设计
+└── requirements.txt         # Python 依赖
 ```
 
 ## 依赖
