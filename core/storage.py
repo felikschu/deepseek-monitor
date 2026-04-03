@@ -410,6 +410,20 @@ class StorageManager:
 
         return results
 
+    async def save_change(self, change_type: str, change_data: Dict):
+        """保存单条变化记录
+
+        Args:
+            change_type: 变化类型
+            change_data: 变化数据
+        """
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            INSERT INTO changes_history (change_type, change_data)
+            VALUES (?, ?)
+        """, (change_type, json.dumps(change_data, ensure_ascii=False, default=str)))
+        self.conn.commit()
+
     async def save_check_results(self, results: Dict):
         """保存检查结果
 

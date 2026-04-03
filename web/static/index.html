@@ -165,6 +165,7 @@ tr:hover td{background:rgba(255,255,255,.03)}
         <button onclick="filterChanges('feature_flags_change',this)">Flags</button>
         <button onclick="filterChanges('legal_doc_update',this)">法律</button>
         <button onclick="filterChanges('cdn_update',this)">CDN</button>
+        <button onclick="filterChanges('new_repo',this)">GitHub</button>
       </div>
     </h2>
     <div class="changes-list" id="changesList">
@@ -212,13 +213,13 @@ tr:hover td{background:rgba(255,255,255,.03)}
     </h2>
     <div id="ghReposPanel">
       <table>
-        <thead><tr><th>仓库</th><th>Stars</th><th>语言</th><th>最近推送</th></tr></thead>
+        <thead><tr><th>仓库</th><th>说明</th><th>Stars</th><th>语言</th><th>最近推送</th></tr></thead>
         <tbody id="ghReposBody"></tbody>
       </table>
     </div>
     <div id="ghReleasesPanel" style="display:none">
       <table>
-        <thead><tr><th>仓库</th><th>Tag</th><th>发布时间</th><th>记录时间</th></tr></thead>
+        <thead><tr><th>仓库</th><th>Tag</th><th>标题</th><th>发布时间</th></tr></thead>
         <tbody id="ghReleasesBody"></tbody>
       </table>
     </div>
@@ -252,7 +253,7 @@ function toBJShort(ts) {
   if (!ts) return '---';
   if (!ts.includes('Z') && !ts.includes('+')) ts += 'Z';
   const d = new Date(ts);
-  return d.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', month: '2-digit', day: '2-digit', hour: '2-digit', hour12: false, minute: '2-digit' }).replace(/\//g, '-');
+  return d.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', hour12: false, minute: '2-digit' }).replace(/\//g, '-');
 }
 
 // 将 GMT 格式字符串（如 "Fri, 27 Mar 2026 03:50:07 GMT"）转为北京时间
@@ -606,7 +607,9 @@ function renderChanges(changes) {
     feature_flags_change: ['&#x1F3F7;','flag'], legal_doc_update: ['&#x1F4C4;','legal'],
     new_resource: ['&#x2728;','resource'], cdn_update: ['&#x2601;','cdn'],
     api_endpoints_change: ['&#x1F517;','endpoint'], new_feature: ['&#x1F680;','endpoint'],
-    pattern_change: ['&#x1F50D;','resource']
+    pattern_change: ['&#x1F50D;','resource'],
+    new_repo: ['&#x1F4BB;','commit'], repo_push: ['&#x1F4BB;','commit'],
+    new_release: ['&#x1F680;','endpoint'], stars_change: ['&#x2B50;','commit'],
   };
 
   list.innerHTML = filtered.map(c => {
@@ -654,6 +657,22 @@ function renderChanges(changes) {
         break;
       case 'pattern_change':
         title = `代码模式变化: ${d.filename}`;
+        break;
+      case 'new_repo':
+        title = `新仓库: ${d.repo_name}`;
+        diff = d.description || '';
+        break;
+      case 'repo_push':
+        title = `仓库更新: ${d.repo_name}`;
+        diff = `推送时间: ${toBJ(d.new_pushed)}`;
+        break;
+      case 'new_release':
+        title = `新 Release: ${d.repo_name} ${d.tag}`;
+        diff = d.title || d.tag;
+        break;
+      case 'stars_change':
+        title = `Star 变化: ${d.repo_name}`;
+        diff = `${(d.old_stars||0).toLocaleString()} → ${(d.new_stars||0).toLocaleString()} (${d.diff > 0 ? '+' : ''}${(d.diff||0).toLocaleString()})`;
         break;
     }
 
@@ -729,13 +748,17 @@ async function loadGithub() {
     document.getElementById('ghRepoCount').textContent = repos.length || data.count || 0;
     document.getElementById('statGHRepos').textContent = repos.length || data.count || 0;
 
+    // 按 pushed_at 降序排列（最近更新的在前）
+    repos.sort((a, b) => (b.pushed_at || '').localeCompare(a.pushed_at || ''));
+
     const tbody = document.getElementById('ghReposBody');
     if (!repos.length) {
-      tbody.innerHTML = '<tr><td colspan="4" style="color:var(--text-dim)">暂无数据，点击「立即检查」开始监控</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="5" style="color:var(--text-dim)">暂无数据，点击「立即检查」开始监控</td></tr>';
     } else {
-      tbody.innerHTML = repos.slice(0, 30).map(r => `<tr>
+      tbody.innerHTML = repos.map(r => `<tr>
         <td><a href="${r.html_url}" target="_blank" style="color:var(--accent);text-decoration:none">${r.name}</a>
           ${r.archived ? '<span style="color:var(--text-dim);font-size:10px"> [archived]</span>' : ''}</td>
+        <td style="font-size:12px;color:var(--text-dim);max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(r.description||'').replace(/"/g,'&quot;')}">${r.description || ''}</td>
         <td style="font-family:monospace">${(r.stars||0).toLocaleString()}</td>
         <td style="font-size:12px;color:var(--text-dim)">${r.language || '---'}</td>
         <td style="font-size:12px">${toBJShort(r.pushed_at)}</td>
@@ -755,8 +778,8 @@ async function loadGithub() {
         return `<tr>
           <td><a href="${rd.repo_url || '#'}" target="_blank" style="color:var(--accent);text-decoration:none">${r.repo_name}</a></td>
           <td style="font-family:monospace;font-size:12px"><a href="${rd.url || '#'}" target="_blank" style="color:var(--text);text-decoration:none">${r.tag_name}</a></td>
-          <td style="font-size:12px">${toBJShort(r.published_at)}</td>
-          <td style="font-size:12px">${toBJShort(r.timestamp)}</td>
+          <td style="font-size:12px;color:var(--text-dim)">${rd.title || r.tag_name}</td>
+          <td style="font-size:12px">${toBJ(r.published_at)}</td>
         </tr>`;
       }).join('');
     }

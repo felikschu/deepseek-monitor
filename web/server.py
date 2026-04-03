@@ -275,6 +275,12 @@ async def api_check(request):
             gh = GitHubMonitor(CONFIG, storage)
             gh_results = await gh.check()
             gh_changes = gh_results.get("changes", [])
+            # 保存 GitHub 变化到 changes_history
+            for change in gh_changes:
+                await storage.save_change(
+                    change.get("type", "github"),
+                    change
+                )
             await gh.cleanup()
         except Exception as e:
             logger.warning(f"GitHub 检查失败（非致命）: {e}")
