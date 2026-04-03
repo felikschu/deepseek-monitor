@@ -313,7 +313,12 @@ const HELP = {
     <h3>&#x1F6E1; DeepSeek Monitor 系统说明</h3>
     <div class="help-section">
       <h4>这是什么？</h4>
-      <p>本系统用于<strong>追踪 DeepSeek 网页端的变化</strong>。它定期访问 <code>chat.deepseek.com</code>，提取前端代码中的各种信息（版本号、功能开关、API 端点等），并与历史记录对比，自动发现变化。</p>
+      <p>本系统用于<strong>追踪 DeepSeek 的变化</strong>。它监控以下数据源：</p>
+      <ul style="margin-left:20px;line-height:1.8">
+        <li><code>chat.deepseek.com</code> — 网页端前端代码</li>
+        <li><code>status.deepseek.com</code> — 官方状态页面</li>
+        <li><code>github.com/deepseek-ai</code> — 开源仓库动态</li>
+      </ul>
     </div>
     <div class="help-section">
       <h4>追踪原理</h4>
@@ -321,6 +326,8 @@ const HELP = {
       <p><strong>JS 文件 hash</strong> — CDN 上的 JS/CSS 文件名包含 hash（如 <code>main.cd620c850b.js</code>），hash 变了 = 文件内容变了。</p>
       <p><strong>Feature Flags</strong> — 前端代码中有 <code>getFeature("xxx", default)</code> 调用，这些 flag 由服务端远程控制，可以随时开关功能而不用发新版。</p>
       <p><strong>法律文档</strong> — Terms of Use 和 Privacy Policy 的 Last-Modified 头。DeepSeek 通常在重大变更前更新法律文档（如 2026年3月27日更新 → 3月29日宕机升级）。</p>
+      <p><strong>Status Page</strong> — 爬取官方状态页面的 Atom Feed，获取服务状态和历史故障事件（包含详细时间线）。</p>
+      <p><strong>GitHub</strong> — 监控 deepseek-ai 组织的仓库创建、代码推送、Release 发布。</p>
     </div>
     <div class="help-section">
       <h4>发现的历史事件</h4>
@@ -467,10 +474,9 @@ const HELP = {
     <div class="help-section">
       <h4>监控内容</h4>
       <table>
-        <tr><td><strong>服务状态</strong></td><td>网页端、API、移动应用的实时运行状态</td></tr>
-        <tr><td><strong>故障事件</strong></td><td>官方记录的中断事件，包含影响范围和持续时间</td></tr>
-        <tr><td><strong>可用性统计</strong></td><td>各服务的历史可用性百分比</td></tr>
-        <tr><td><strong>中断统计</strong></td><td>今日/本周的完全中断、部分中断时长</td></tr>
+        <tr><td><strong>服务状态</strong></td><td>API 服务、网页对话服务的实时运行状态</td></tr>
+        <tr><td><strong>故障事件</strong></td><td>官方记录的中断事件，包含详细时间线（开始调查→修复中→监控中→已解决）</td></tr>
+        <tr><td><strong>时间显示</strong></td><td>点击「显示北京时间」按钮可在原始时间和北京时间之间切换</td></tr>
       </table>
     </div>
     <div class="help-section">
@@ -481,6 +487,10 @@ const HELP = {
         <tr><td><strong>部分中断</strong></td><td>部分功能不可用</td></tr>
         <tr><td><strong>完全中断</strong></td><td>服务完全不可用</td></tr>
       </table>
+    </div>
+    <div class="help-section">
+      <h4>关于 CST 时间</h4>
+      <p>Status Page 使用的是 CST（China Standard Time，中国标准时间），即北京时间（UTC+8）。点击事件可展开查看完整时间线。</p>
     </div>
   `,
 };

@@ -99,24 +99,36 @@ class StatusMonitor:
             async with session.get(STATUS_PAGE_URL) as resp:
                 if resp.status == 200:
                     html = await resp.text()
-                    # 简单提取组件状态
-                    # 查找类似：{"name":"API Service","status":"operational"}
-                    pattern = r'"name":"([^"]+)","status":"([^"]+)"'
-                    matches = re.findall(pattern, html)
                     
+                    # 从 HTML 中提取组件信息
+                    # 格式: <div data-component-id="..." data-component-status="...">
+                    #       <span class="name">组件名称</span>
                     components = []
-                    for name, status in matches[:5]:  # 限制数量避免重复
-                        if any(c["name"] == name for c in components):
-                            continue
-                        components.append({
-                            "id": name.lower().replace(" ", "_"),
-                            "name": name,
-                            "status": status,
-                        })
+                    
+                    # 查找所有组件块
+                    comp_pattern = r'<div data-component-id="([^"]+)"[^>]*data-component-status="([^"]+)"[^>]*>.*?<span class="name">\s*([^<]+)\s*</span>'
+                    matches = re.findall(comp_pattern, html, re.DOTALL)
+                    
+                    for comp_id, status, name in matches:
+                        name = name.strip()
+                        if name and not any(c["id"] == comp_id for c in components):
+                            components.append({
+                                "id": comp_id,
+                                "name": name,
+                                "status": status,
+                            })
                     
                     if components:
                         self.results["components"] = components
                         logger.info(f"检测到 {len(components)} 个组件")
+                    else:
+                        # 备用方案：从页面状态文本提取
+                        if "All Systems Operational" in html:
+                            self.results["components"] = [
+                                {"id": "api", "name": "API 服务", "status": "operational"},
+                                {"id": "web", "name": "网页对话服务", "status": "operational"},
+                            ]
+                            logger.info("使用备用方案：所有系统正常")
         except Exception as e:
             logger.warning(f"获取组件状态失败: {e}")
 
