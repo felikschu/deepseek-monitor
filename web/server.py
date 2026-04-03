@@ -538,9 +538,27 @@ async def _run_check():
         logger.error(f"自动检查失败: {e}")
 
 
-async def on_startup(app):
-    """服务器启动时开启后台检查"""
-    app["auto_check"] = asyncio.create_task(_auto_check_task(app))
+# 全局变量存储当前检查间隔（分钟）
+_current_interval_minutes = CONFIG.get("monitoring", {}).get("check_interval_hours", 3) * 60
+
+
+async def _auto_check_task(app):
+    """后台自动检查任务"""
+    global _current_interval_minutes
+    logger.info(f"自动检查已启动，间隔 {_current_interval_minutes} 分钟")
+
+    # 启动后延迟30秒再执行首次检查，等服务器就绪
+    await asyncio.sleep(30)
+    while True:
+        try:
+            logger.info("执行定时自动检查...")
+            await _run_check()
+            logger.info("定时自动检查完成")
+        except Exception as e:
+            logger.error(f"自动检查失败: {e}")
+        
+        # 使用当前的间隔设置
+        await asyncio.sleep(_current_interval_minutes * 60)
 
 
 async def on_cleanup(app):
@@ -548,6 +566,49 @@ async def on_cleanup(app):
     task = app.get("auto_check")
     if task:
         task.cancel()
+
+
+async def api_settings(request):
+    """获取当前设置"""
+    global _current_interval_minutes
+    return web.json_response({
+        "check_interval_minutes": _current_interval_minutes,
+        "check_interval_options": [
+            {"value": 3, "label": "3分钟"},
+            {"value": 10, "label": "10分钟"},
+            {"value": 60, "label": "1小时"},
+            {"value": 180, "label": "3小时"},
+        ],
+    })
+
+
+async def api_update_settings(request):
+    """更新设置"""
+    global _current_interval_minutes
+    try:
+        data = await request.json()
+        new_interval = data.get("check_interval_minutes")
+        
+        # 验证允许的选项
+        allowed_options = [3, 10, 60, 180]
+        if new_interval not in allowed_options:
+            return web.json_response({
+                "status": "error",
+                "message": f"Invalid interval. Allowed: {allowed_options}"
+            }, status=400)
+        
+        _current_interval_minutes = new_interval
+        logger.info(f"检查间隔已更新为 {new_interval} 分钟")
+        
+        return web.json_response({
+            "status": "ok",
+            "check_interval_minutes": _current_interval_minutes,
+        })
+    except Exception as e:
+        return web.json_response({
+            "status": "error",
+            "message": str(e)
+        }, status=500)
 
 
 def create_app():
@@ -572,6 +633,8 @@ def create_app():
     app.router.add_get("/api/github/repos", api_github_repos)
     app.router.add_get("/api/github/releases", api_github_releases)
     app.router.add_get("/api/status_page", api_status_page)
+    app.router.add_get("/api/settings", api_settings)
+    app.router.add_post("/api/settings", api_update_settings)
 
     # Static files
     app.router.add_static("/static", STATIC_DIR)

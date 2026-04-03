@@ -95,6 +95,25 @@ tr:hover td{background:rgba(255,255,255,.03)}
   </div>
 </div>
 
+<!-- 设置弹窗 -->
+<div class="modal-overlay" id="settingsModal">
+  <div class="modal">
+    <button class="close-btn" onclick="closeSettings()">&times;</button>
+    <h3>&#x2699; 设置</h3>
+    <div class="help-section">
+      <h4>自动检查间隔</h4>
+      <p style="font-size:12px;color:var(--text-dim);margin-bottom:12px">设置系统自动检查的时间间隔（需要重启服务器后生效）</p>
+      <div id="intervalOptions" style="display:flex;flex-direction:column;gap:8px">
+        <!-- 选项会通过 JS 动态生成 -->
+      </div>
+    </div>
+    <div class="help-section">
+      <h4>当前设置</h4>
+      <p style="font-size:13px">当前检查间隔: <strong id="currentInterval">---</strong></p>
+    </div>
+  </div>
+</div>
+
 <div class="header">
   <h1><span class="logo">&#x1F6E1;</span> DeepSeek Monitor <span id="statusDot" class="status-dot offline"></span>
     <button class="btn-help" onclick="showHelp('system')" title="系统说明">?</button>
@@ -107,6 +126,7 @@ tr:hover td{background:rgba(255,255,255,.03)}
   <div class="actions">
     <button class="btn btn-primary" id="btnCheck" onclick="runCheck()">立即检查</button>
     <button class="btn btn-secondary" onclick="exportReport()">导出报告</button>
+    <button class="btn btn-secondary" onclick="showSettings()">⚙️ 设置</button>
   </div>
 </div>
 
@@ -504,6 +524,65 @@ function showHelp(key) {
 
 function closeHelp() {
   document.getElementById('helpModal').classList.remove('show');
+}
+
+// 设置相关
+let currentSettings = {
+  check_interval_minutes: 180,
+  check_interval_options: []
+};
+
+async function loadSettings() {
+  try {
+    const data = await fetchJSON('/api/settings');
+    currentSettings = data;
+    updateSettingsUI();
+  } catch(e) { console.error('Load settings failed:', e); }
+}
+
+function updateSettingsUI() {
+  const currentLabel = currentSettings.check_interval_options.find(
+    o => o.value === currentSettings.check_interval_minutes
+  )?.label || `${currentSettings.check_interval_minutes}分钟`;
+  document.getElementById('currentInterval').textContent = currentLabel;
+  
+  // 生成选项按钮
+  const container = document.getElementById('intervalOptions');
+  container.innerHTML = currentSettings.check_interval_options.map(opt => `
+    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;padding:8px 12px;background:rgba(255,255,255,.05);border-radius:6px;transition:all .2s" onmouseover="this.style.background='rgba(255,255,255,.1)'" onmouseout="this.style.background='rgba(255,255,255,.05)'">
+      <input type="radio" name="interval" value="${opt.value}" ${opt.value === currentSettings.check_interval_minutes ? 'checked' : ''} onchange="updateInterval(${opt.value})" style="cursor:pointer">
+      <span style="font-size:13px">${opt.label}</span>
+    </label>
+  `).join('');
+}
+
+async function updateInterval(minutes) {
+  try {
+    const r = await fetch(API + '/api/settings', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({check_interval_minutes: minutes})
+    });
+    const data = await r.json();
+    if (data.status === 'ok') {
+      currentSettings.check_interval_minutes = minutes;
+      updateSettingsUI();
+      showToast(`检查间隔已设置为 ${minutes} 分钟（下次启动生效）`, 'success');
+    } else {
+      showToast('设置失败: ' + (data.message || '未知错误'), 'error');
+    }
+  } catch(e) {
+    showToast('设置失败: ' + e.message, 'error');
+  }
+}
+
+function showSettings() {
+  loadSettings();
+  document.getElementById('settingsModal').classList.add('show');
+}
+
+function closeSettings() {
+  document.getElementById('settingsModal').classList.remove('show');
 }
 
 // 点击遮罩关闭
@@ -1153,6 +1232,14 @@ async function loadAll() {
     loadStatusPage(),
   ]);
 }
+
+// 页面加载完成后初始化
+document.addEventListener('DOMContentLoaded', function() {
+  // 设置弹窗事件监听
+  document.getElementById('settingsModal').addEventListener('click', function(e) {
+    if (e.target === this) closeSettings();
+  });
+});
 
 loadAll();
 setInterval(loadAll, 60000);
