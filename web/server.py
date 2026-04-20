@@ -245,6 +245,7 @@ def is_high_signal_change(change_type, change_data):
         "commit_change",
         "competitor_model_change",
         "feature_flags_change",
+        "huggingface_model_change",
         "legal_doc_update",
         "surface_change",
         "new_repo",
@@ -684,10 +685,29 @@ async def api_check(request):
         except Exception as e:
             logger.warning(f"竞品侦察失败（非致命）: {e}")
 
+        huggingface_changes = []
+        try:
+            from core.huggingface_monitor import HuggingFaceMonitor
+            hf = HuggingFaceMonitor(CONFIG, storage)
+            huggingface_results = await hf.check()
+            huggingface_changes = huggingface_results.get("changes", [])
+            for change in huggingface_changes:
+                await storage.save_change(change.get("type", "huggingface_model_change"), change)
+            await hf.cleanup()
+        except Exception as e:
+            logger.warning(f"Hugging Face 检查失败（非致命）: {e}")
+
         await storage.close()
 
         changes = results.get("changes", [])
-        total = len(changes) + len(official_changes) + len(gh_changes) + len(status_changes) + len(competitor_changes)
+        total = (
+            len(changes)
+            + len(official_changes)
+            + len(gh_changes)
+            + len(status_changes)
+            + len(competitor_changes)
+            + len(huggingface_changes)
+        )
         commit_info = results.get("commit", {})
         return web.json_response({
             "ok": True,
@@ -698,6 +718,7 @@ async def api_check(request):
             "github_changes": len(gh_changes),
             "status_changes": len(status_changes),
             "competitor_changes": len(competitor_changes),
+            "huggingface_changes": len(huggingface_changes),
             "commit": commit_info,
             "timestamp": results.get("timestamp"),
         })
@@ -824,6 +845,7 @@ async def api_highlights(request):
                 change_data.get("filename"),
                 change_data.get("title"),
                 change_data.get("surface_name"),
+                change_data.get("org_name"),
                 change_data.get("repo_name"),
                 change_data.get("incident_id"),
                 change_data.get("doc_name"),
@@ -880,6 +902,36 @@ async def api_competitors(request):
             except (json.JSONDecodeError, TypeError):
                 row["signals"] = {}
         return web.json_response({"competitors": rows})
+    finally:
+        conn.close()
+
+
+async def api_huggingface(request):
+    """Hugging Face 官方组织快照"""
+    limit = int(request.query.get("limit", 20))
+    conn = get_db()
+    try:
+        cur = conn.cursor()
+        try:
+            cur.execute("""
+                SELECT h1.*
+                FROM huggingface_snapshots h1
+                JOIN (
+                    SELECT org_name, MAX(id) AS max_id
+                    FROM huggingface_snapshots
+                    GROUP BY org_name
+                ) h2 ON h1.id = h2.max_id
+                ORDER BY h1.timestamp DESC
+                LIMIT ?
+            """, (limit,))
+        except sqlite3.OperationalError:
+            return web.json_response({"organizations": []})
+        rows = rows_to_list(cur.fetchall())
+        for row in rows:
+            row["org"] = _parse_json_blob(row.pop("overview_json", None))
+            row["models"] = _parse_json_blob(row.pop("models_json", None)) or []
+            row["signals"] = _parse_json_blob(row.pop("signals_json", None))
+        return web.json_response({"organizations": rows})
     finally:
         conn.close()
 
@@ -957,6 +1009,23 @@ async def export_report(request):
             except (json.JSONDecodeError, TypeError):
                 row["signals"] = {}
         report["official_surfaces"] = surfaces
+
+        cur.execute("""
+            SELECT h1.*
+            FROM huggingface_snapshots h1
+            JOIN (
+                SELECT org_name, MAX(id) AS max_id
+                FROM huggingface_snapshots
+                GROUP BY org_name
+            ) h2 ON h1.id = h2.max_id
+            ORDER BY h1.timestamp DESC
+        """)
+        huggingface_rows = rows_to_list(cur.fetchall())
+        for row in huggingface_rows:
+            row["org"] = _parse_json_blob(row.pop("overview_json", None))
+            row["models"] = _parse_json_blob(row.pop("models_json", None)) or []
+            row["signals"] = _parse_json_blob(row.pop("signals_json", None))
+        report["huggingface_orgs"] = huggingface_rows
 
         resp = web.Response(
             text=json.dumps(report, ensure_ascii=False, indent=2, default=str),
@@ -1039,6 +1108,26 @@ async def _run_check():
             await sm.cleanup()
         except Exception as e:
             logger.warning(f"Status 检查失败（非致命）: {e}")
+
+        try:
+            from core.competitor_monitor import CompetitorMonitor
+            cm = CompetitorMonitor(CONFIG, storage)
+            competitor_results = await cm.check()
+            for change in competitor_results.get("changes", []):
+                await storage.save_change(change.get("type", "competitor_model_change"), change)
+            await cm.cleanup()
+        except Exception as e:
+            logger.warning(f"竞品侦察失败（非致命）: {e}")
+
+        try:
+            from core.huggingface_monitor import HuggingFaceMonitor
+            hf = HuggingFaceMonitor(CONFIG, storage)
+            huggingface_results = await hf.check()
+            for change in huggingface_results.get("changes", []):
+                await storage.save_change(change.get("type", "huggingface_model_change"), change)
+            await hf.cleanup()
+        except Exception as e:
+            logger.warning(f"Hugging Face 检查失败（非致命）: {e}")
 
         await storage.close()
     except Exception as e:
@@ -1150,6 +1239,7 @@ def create_app():
     app.router.add_get("/api/status_page", api_status_page)
     app.router.add_get("/api/highlights", api_highlights)
     app.router.add_get("/api/competitors", api_competitors)
+    app.router.add_get("/api/huggingface", api_huggingface)
     app.router.add_get("/api/settings", api_settings)
     app.router.add_post("/api/settings", api_update_settings)
 

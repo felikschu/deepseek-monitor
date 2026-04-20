@@ -102,6 +102,42 @@ class StorageLogicTests(unittest.IsolatedAsyncioTestCase):
         config = await self.storage.get_last_model_config()
         self.assertEqual(config["config"]["version"], 2)
 
+    async def test_get_last_huggingface_snapshot_prefers_latest_id_when_timestamps_match(self):
+        cursor = self.storage.conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO huggingface_snapshots (org_name, overview_json, models_json, signals_json, model_count, timestamp)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "deepseek-ai",
+                '{"numModels": 1}',
+                '[{"id":"deepseek-ai/DeepSeek-V3.1","name":"DeepSeek-V3.1"}]',
+                "{}",
+                1,
+                "2026-04-20 00:00:00",
+            ),
+        )
+        cursor.execute(
+            """
+            INSERT INTO huggingface_snapshots (org_name, overview_json, models_json, signals_json, model_count, timestamp)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "deepseek-ai",
+                '{"numModels": 2}',
+                '[{"id":"deepseek-ai/DeepSeek-OCR-2","name":"DeepSeek-OCR-2"}]',
+                "{}",
+                2,
+                "2026-04-20 00:00:00",
+            ),
+        )
+        self.storage.conn.commit()
+
+        snapshot = await self.storage.get_last_huggingface_snapshot("deepseek-ai")
+        self.assertEqual(snapshot["org"]["numModels"], 2)
+        self.assertEqual(snapshot["models"][0]["name"], "DeepSeek-OCR-2")
+
 
 if __name__ == "__main__":
     unittest.main()

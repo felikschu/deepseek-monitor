@@ -227,6 +227,18 @@ tr:hover td{background:rgba(255,255,255,.03)}
     </table>
   </div>
 
+  <!-- Hugging Face 官方组织 -->
+  <div class="card full">
+    <h2>
+      <span class="left">Hugging Face (deepseek-ai) <span class="badge" id="hfCount">0</span></span>
+      <button class="btn-help" onclick="showHelp('huggingface')" title="Hugging Face 说明">?</button>
+    </h2>
+    <table>
+      <thead><tr><th>模型卡</th><th>类型</th><th>最近更新时间</th><th>下载/标签</th></tr></thead>
+      <tbody id="hfBody"></tbody>
+    </table>
+  </div>
+
   <!-- 变更记录 -->
   <div class="card full">
     <h2>
@@ -245,6 +257,7 @@ tr:hover td{background:rgba(255,255,255,.03)}
         <button onclick="filterChanges('surface_change',this)">官网/文档</button>
         <button onclick="filterChanges('bundle_insights_change',this)">Bundle</button>
         <button onclick="filterChanges('competitor_model_change',this)">竞品型号</button>
+        <button onclick="filterChanges('huggingface_model_change',this)">HF</button>
         <button onclick="filterChanges('new_repo',this)">GitHub</button>
         <button onclick="filterChanges('status',this)">Status</button>
       </div>
@@ -550,6 +563,21 @@ const HELP = {
       <p>优先显示价格/套餐/商业化信号；如果没有，再回退显示官网版本号和日期。这样你能直接看出对方是在发新模型，还是在推新的收费产品。</p>
     </div>
   `,
+  huggingface: `
+    <h3>&#x1F917; Hugging Face 官方组织</h3>
+    <div class="help-section">
+      <h4>监控什么？</h4>
+      <p>重点看 DeepSeek 官方组织 <code>deepseek-ai</code> 的公开模型卡列表、模型卡最近更新时间，以及组织级公开统计。</p>
+    </div>
+    <div class="help-section">
+      <h4>为什么重要？</h4>
+      <p>有些型号不会第一时间在官网高调挂出来，但会先体现在 Hugging Face 官方组织，或者已有模型卡被重新更新时间、补 tag、补 README、补权重。</p>
+    </div>
+    <div class="help-section">
+      <h4>时间怎么理解？</h4>
+      <p>这里的“最近更新时间”来自 Hugging Face 模型 API 的 <code>lastModified</code> 字段，表示模型卡/仓库自身最近一次公开变动时间，不是 monitor 本地发现时间。</p>
+    </div>
+  `,
   changes: `
     <h3>&#x1F4CB; 变更记录</h3>
     <div class="help-section">
@@ -815,6 +843,7 @@ async function loadTimeline() {
       cdn_update:'#ef5350', api_endpoints_change:'#66bb6a',
       new_feature:'#42a5f5', surface_change:'#8d6e63',
       competitor_model_change:'#7cb342',
+      huggingface_model_change:'#00acc1',
       repo_push:'#5c6bc0', new_release:'#26a69a', new_repo:'#7e57c2',
       stars_change:'#fbc02d', new_incident:'#ef5350', status_change:'#78909c'
     };
@@ -826,6 +855,7 @@ async function loadTimeline() {
       cdn_update:'CDN 更新', api_endpoints_change:'端点变化',
       new_feature:'新功能', surface_change:'官网/文档页',
       competitor_model_change:'竞品型号',
+      huggingface_model_change:'Hugging Face',
       repo_push:'GitHub 活动', new_release:'GitHub Release',
       new_repo:'新仓库', stars_change:'Stars 变化',
       new_incident:'Status 事件', status_change:'Status 状态'
@@ -976,6 +1006,7 @@ function renderChanges(changes) {
     pattern_change: ['&#x1F50D;','resource'], surface_change: ['&#x1F30D;','resource'],
     bundle_insights_change: ['&#x1F9E9;','resource'],
     competitor_model_change: ['&#x1F50E;','resource'],
+    huggingface_model_change: ['&#x1F917;','resource'],
     new_repo: ['&#x1F4BB;','commit'], repo_push: ['&#x1F4BB;','commit'],
     new_release: ['&#x1F680;','endpoint'], stars_change: ['&#x2B50;','commit'],
     status_change: ['&#x1F4CA;','flag'], new_incident: ['&#x26A0;','legal'],
@@ -1081,6 +1112,11 @@ function renderChanges(changes) {
         diff = d.summary || '';
         metaTime = d.source_time ? `官方时间 ${formatAnyTime(d.source_time)}` : '';
         break;
+      case 'huggingface_model_change':
+        title = `Hugging Face: ${d.org_name || 'deepseek-ai'} 模型卡变化`;
+        diff = d.summary || '';
+        metaTime = d.source_time ? `模型卡时间 ${formatAnyTime(d.source_time)}` : '';
+        break;
     }
 
     const observedAt = d.observed_at || c.timestamp;
@@ -1173,6 +1209,17 @@ function renderChanges(changes) {
         ${Array.isArray(d.added_plan_signals) && d.added_plan_signals.length ? `<div><strong>套餐线索:</strong> ${d.added_plan_signals.join(' | ')}</div>` : ''}
         ${Array.isArray(d.added_dates) && d.added_dates.length ? `<div><strong>日期信号:</strong> ${d.added_dates.join(', ')}</div>` : ''}
         ${d.source_time ? `<div><strong>页面时间:</strong> ${formatAnyTime(d.source_time)}</div>` : ''}
+        <div><strong>本地发现:</strong> ${toBJ(observedAt)}</div>
+        ${evidence.length ? `<div style="margin-top:6px"><strong>证据:</strong>${evidence.map(item => `<div style="margin-top:2px">${item}</div>`).join('')}</div>` : ''}
+      </div>`;
+    } else if (c.change_type === 'huggingface_model_change') {
+      const evidence = Array.isArray(d.evidence) ? d.evidence : [];
+      detailHTML = `<div class="change-expand" style="display:none;margin-top:6px;padding:8px 10px;background:rgba(255,255,255,.03);border-radius:4px;font-size:12px;line-height:1.8">
+        <div><strong>组织:</strong> <a href="${d.org_url || d.models_url || '#'}" target="_blank" style="color:var(--accent)">${d.org_name || 'deepseek-ai'}</a></div>
+        ${Array.isArray(d.added_models) && d.added_models.length ? `<div><strong>新增模型卡:</strong> ${d.added_models.map(item => item.name).join(', ')}</div>` : ''}
+        ${Array.isArray(d.updated_models) && d.updated_models.length ? `<div><strong>更新时间变化:</strong> ${d.updated_models.map(item => `${item.name} (${item.new_last_modified})`).join(' | ')}</div>` : ''}
+        ${Array.isArray(d.removed_models) && d.removed_models.length ? `<div><strong>移除模型卡:</strong> ${d.removed_models.map(item => item.name).join(', ')}</div>` : ''}
+        ${d.source_time ? `<div><strong>模型卡时间:</strong> ${formatAnyTime(d.source_time)}</div>` : ''}
         <div><strong>本地发现:</strong> ${toBJ(observedAt)}</div>
         ${evidence.length ? `<div style="margin-top:6px"><strong>证据:</strong>${evidence.map(item => `<div style="margin-top:2px">${item}</div>`).join('')}</div>` : ''}
       </div>`;
@@ -1398,6 +1445,7 @@ async function loadHighlights() {
         legal_doc_update: '法律文档',
         surface_change: '官网/文档',
         bundle_insights_change: 'Bundle',
+        huggingface_model_change: 'Hugging Face',
         new_repo: 'GitHub',
         repo_push: 'GitHub',
         new_release: 'GitHub Release',
@@ -1452,6 +1500,35 @@ async function loadCompetitors() {
       </tr>`;
     }).join('');
   } catch(e) { console.error('Competitors failed:', e); }
+}
+
+async function loadHuggingFace() {
+  try {
+    const data = await fetchJSON('/api/huggingface?limit=5');
+    const items = data.organizations || [];
+    const latest = items[0];
+    const org = latest?.org || {};
+    const models = latest?.models || [];
+    document.getElementById('hfCount').textContent = org.numModels || models.length || 0;
+    const tbody = document.getElementById('hfBody');
+    if (!latest || !models.length) {
+      tbody.innerHTML = '<tr><td colspan="4" style="color:var(--text-dim)">暂无 Hugging Face 官方快照</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = models.slice(0, 12).map(item => {
+      const tags = []
+        .concat(item.pipeline_tag ? [item.pipeline_tag] : [])
+        .concat((item.tags || []).filter(tag => /deepseek|ocr|vision|code|agent/i.test(tag)).slice(0, 3))
+        .slice(0, 4);
+      return `<tr>
+        <td><a href="${item.url}" target="_blank" style="color:var(--accent);text-decoration:none">${item.name}</a></td>
+        <td style="font-size:12px;color:var(--text-dim)">${item.pipeline_tag || item.library_name || '---'}</td>
+        <td style="font-size:12px">${item.lastModified ? toBJ(item.lastModified) : '---'}</td>
+        <td style="font-size:12px;color:var(--text-dim)">${(item.downloads || 0).toLocaleString()} 下载${tags.length ? ` | ${tags.join(' | ')}` : ''}</td>
+      </tr>`;
+    }).join('');
+  } catch(e) { console.error('Hugging Face failed:', e); }
 }
 
 async function loadLegal() {
@@ -1726,6 +1803,7 @@ async function loadAll() {
     loadBundles(),
     loadHighlights(),
     loadCompetitors(),
+    loadHuggingFace(),
     loadLegal(),
     loadSurfaces(),
     loadGithub(),

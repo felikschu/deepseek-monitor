@@ -21,6 +21,14 @@ class WebLogicTests(unittest.TestCase):
     def test_bundle_insights_are_high_signal(self):
         self.assertTrue(is_high_signal_change("bundle_insights_change", {"summary": "coder route added"}))
 
+    def test_huggingface_model_change_is_high_signal(self):
+        self.assertTrue(
+            is_high_signal_change(
+                "huggingface_model_change",
+                {"summary": "Hugging Face 出现新模型卡: DeepSeek-OCR-2"},
+            )
+        )
+
     def test_vendor_runtime_bundle_insights_are_not_high_signal(self):
         self.assertFalse(
             is_high_signal_change(

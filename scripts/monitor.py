@@ -53,6 +53,7 @@ class DeepSeekMonitor:
         self.github_monitor = None
         self.status_monitor = None
         self.competitor_monitor = None
+        self.huggingface_monitor = None
 
         logger.info("DeepSeek 监控系统初始化完成")
 
@@ -122,13 +123,13 @@ class DeepSeekMonitor:
 
         try:
             # 1. 前端资源监控
-            logger.info("\n[1/6] 检查前端资源变化...")
+            logger.info("\n[1/7] 检查前端资源变化...")
             frontend_results = await self.frontend_monitor.check()
             results["checks"]["frontend"] = frontend_results
             logger.info(f"前端资源检查完成: {len(frontend_results.get('changes', []))} 个变化")
 
             # 2. 配置监控
-            logger.info("\n[2/6] 检查模型配置变化...")
+            logger.info("\n[2/7] 检查模型配置变化...")
             if self.config_monitor is None:
                 from core.config_monitor import ConfigMonitor
                 self.config_monitor = ConfigMonitor(self.config, self.storage)
@@ -139,7 +140,7 @@ class DeepSeekMonitor:
             # 3. 行为监控（这个比较慢，可选）
             behavior_enabled = self.config.get("behavior", {}).get("enabled", True)
             if behavior_enabled:
-                logger.info("\n[3/6] 检查行为特征变化...")
+                logger.info("\n[3/7] 检查行为特征变化...")
                 if self.behavior_monitor is None:
                     from core.behavior_monitor import BehaviorMonitor
                     self.behavior_monitor = BehaviorMonitor(self.config, self.storage)
@@ -147,11 +148,11 @@ class DeepSeekMonitor:
                 results["checks"]["behavior"] = behavior_results
                 logger.info(f"行为检查完成: {len(behavior_results.get('changes', []))} 个变化")
             else:
-                logger.info("\n[3/6] 跳过行为特征检查（已禁用）")
+                logger.info("\n[3/7] 跳过行为特征检查（已禁用）")
                 results["checks"]["behavior"] = {"status": "disabled"}
 
             # 4. 官方页面/文档监控
-            logger.info("\n[4/6] 检查官网与文档页变化...")
+            logger.info("\n[4/7] 检查官网与文档页变化...")
             if self.official_monitor is None:
                 from core.official_monitor import OfficialMonitor
                 self.official_monitor = OfficialMonitor(self.config, self.storage)
@@ -160,7 +161,7 @@ class DeepSeekMonitor:
             logger.info(f"官方页面检查完成: {len(official_results.get('changes', []))} 个变化")
 
             # 5. GitHub / Status
-            logger.info("\n[5/6] 检查 GitHub 与 Status Page...")
+            logger.info("\n[5/7] 检查 GitHub 与 Status Page...")
             if self.github_monitor is None:
                 from core.github_monitor import GitHubMonitor
                 self.github_monitor = GitHubMonitor(self.config, self.storage)
@@ -175,13 +176,22 @@ class DeepSeekMonitor:
             )
 
             # 6. 竞品侦察
-            logger.info("\n[6/6] 检查竞品型号与价格信号...")
+            logger.info("\n[6/7] 检查竞品型号与价格信号...")
             if self.competitor_monitor is None:
                 from core.competitor_monitor import CompetitorMonitor
                 self.competitor_monitor = CompetitorMonitor(self.config, self.storage)
             competitor_results = await self.competitor_monitor.check()
             results["checks"]["competitor"] = competitor_results
             logger.info(f"竞品侦察完成: {len(competitor_results.get('changes', []))} 个变化")
+
+            # 7. Hugging Face 官方组织
+            logger.info("\n[7/7] 检查 Hugging Face 官方组织动向...")
+            if self.huggingface_monitor is None:
+                from core.huggingface_monitor import HuggingFaceMonitor
+                self.huggingface_monitor = HuggingFaceMonitor(self.config, self.storage)
+            huggingface_results = await self.huggingface_monitor.check()
+            results["checks"]["huggingface"] = huggingface_results
+            logger.info(f"Hugging Face 检查完成: {len(huggingface_results.get('changes', []))} 个变化")
 
         except Exception as e:
             logger.error(f"监控检查失败: {e}", exc_info=True)
@@ -258,6 +268,8 @@ class DeepSeekMonitor:
             await self.status_monitor.cleanup()
         if self.competitor_monitor:
             await self.competitor_monitor.cleanup()
+        if self.huggingface_monitor:
+            await self.huggingface_monitor.cleanup()
 
         await self.storage.close()
 

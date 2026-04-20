@@ -300,3 +300,10 @@ competitor_surfaces:
       url: "https://www.minimax.io/news/minimax-mcp"
       category: "competitor_news"
       script_probe_limit: 2
+
+# Hugging Face 官方组织监控
+huggingface:
+  enabled: true
+  org: "deepseek-ai"
+  base_url: "https://huggingface.co"
+  max_models: 50

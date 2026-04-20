@@ -279,6 +279,18 @@ class StorageManager:
             )
         """)
 
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS huggingface_snapshots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                org_name TEXT NOT NULL,
+                overview_json TEXT NOT NULL,
+                models_json TEXT NOT NULL,
+                signals_json TEXT,
+                model_count INTEGER,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_changes_history_type ON changes_history(change_type)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_commit_history_id ON commit_history(commit_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_legal_docs_name ON legal_docs(doc_name)")
@@ -286,6 +298,7 @@ class StorageManager:
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_status_incidents_id ON status_incidents(incident_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_surface_snapshots_url ON surface_snapshots(url)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_competitor_snapshots_url ON competitor_snapshots(url)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_huggingface_snapshots_org ON huggingface_snapshots(org_name)")
 
         self.conn.commit()
 
@@ -599,6 +612,8 @@ class StorageManager:
             changes.extend(results.get("checks", {}).get("official", {}).get("changes", []))
             changes.extend(results.get("checks", {}).get("github", {}).get("changes", []))
             changes.extend(results.get("checks", {}).get("status", {}).get("changes", []))
+            changes.extend(results.get("checks", {}).get("competitor", {}).get("changes", []))
+            changes.extend(results.get("checks", {}).get("huggingface", {}).get("changes", []))
         else:
             changes.extend(results.get("changes", []))
 
@@ -1188,6 +1203,93 @@ class StorageManager:
             rows.append(item)
         return rows
 
+    async def save_huggingface_snapshot(self, org_name: str, snapshot: Dict):
+        last = await self.get_last_huggingface_snapshot(org_name)
+        if last:
+            same_signature = (
+                json.dumps(last.get("org", {}), ensure_ascii=False, sort_keys=True)
+                == json.dumps(snapshot.get("org", {}), ensure_ascii=False, sort_keys=True)
+                and json.dumps(last.get("models", []), ensure_ascii=False, sort_keys=True)
+                == json.dumps(snapshot.get("models", []), ensure_ascii=False, sort_keys=True)
+                and json.dumps(last.get("signals", {}), ensure_ascii=False, sort_keys=True)
+                == json.dumps(snapshot.get("signals", {}), ensure_ascii=False, sort_keys=True)
+            )
+            if same_signature:
+                return
+
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            INSERT INTO huggingface_snapshots (
+                org_name, overview_json, models_json, signals_json, model_count
+            )
+            VALUES (?, ?, ?, ?, ?)
+        """, (
+            org_name,
+            json.dumps(snapshot.get("org", {}), ensure_ascii=False, default=str),
+            json.dumps(snapshot.get("models", []), ensure_ascii=False, default=str),
+            json.dumps(snapshot.get("signals", {}), ensure_ascii=False, default=str),
+            len(snapshot.get("models", [])),
+        ))
+        self.conn.commit()
+
+    async def get_last_huggingface_snapshot(self, org_name: str) -> Optional[Dict]:
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            SELECT *
+            FROM huggingface_snapshots
+            WHERE org_name = ?
+            ORDER BY id DESC
+            LIMIT 1
+        """, (org_name,))
+        row = cursor.fetchone()
+        if not row:
+            return None
+        item = dict(row)
+        try:
+            item["org"] = json.loads(item.pop("overview_json") or "{}")
+        except (json.JSONDecodeError, TypeError):
+            item["org"] = {}
+        try:
+            item["models"] = json.loads(item.pop("models_json") or "[]")
+        except (json.JSONDecodeError, TypeError):
+            item["models"] = []
+        try:
+            item["signals"] = json.loads(item.pop("signals_json") or "{}")
+        except (json.JSONDecodeError, TypeError):
+            item["signals"] = {}
+        return item
+
+    async def get_latest_huggingface_snapshots(self, limit: int = 20) -> List[Dict]:
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            SELECT h1.*
+            FROM huggingface_snapshots h1
+            JOIN (
+                SELECT org_name, MAX(id) AS max_id
+                FROM huggingface_snapshots
+                GROUP BY org_name
+            ) h2 ON h1.id = h2.max_id
+            ORDER BY h1.timestamp DESC
+            LIMIT ?
+        """, (limit,))
+        rows = []
+        for row in cursor.fetchall():
+            item = dict(row)
+            try:
+                item["org"] = json.loads(item.pop("overview_json") or "{}")
+            except (json.JSONDecodeError, TypeError):
+                item["org"] = {}
+            try:
+                item["models"] = json.loads(item.pop("models_json") or "[]")
+            except (json.JSONDecodeError, TypeError):
+                item["models"] = []
+            try:
+                item["signals"] = json.loads(item.pop("signals_json") or "{}")
+            except (json.JSONDecodeError, TypeError):
+                item["signals"] = {}
+            rows.append(item)
+        return rows
+
     async def cleanup_old_data(self, retention_days: int = 90):
         """清理旧数据
 
@@ -1215,6 +1317,7 @@ class StorageManager:
             "github_snapshots",
             "status_snapshots",
             "competitor_snapshots",
+            "huggingface_snapshots",
         ]
 
         for table in tables:
