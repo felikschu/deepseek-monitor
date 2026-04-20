@@ -74,6 +74,16 @@ class StorageManager:
             )
         """)
 
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS bundle_insights (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                filename TEXT NOT NULL,
+                bundle_type TEXT NOT NULL,
+                insights TEXT NOT NULL,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
         # 模型配置表
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS model_configs (
@@ -181,6 +191,7 @@ class StorageManager:
 
         # 创建索引
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_resource_hashes_filename ON resource_hashes(filename)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_bundle_insights_filename ON bundle_insights(filename)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_test_results_prompt ON test_results(prompt)")
         # GitHub 监控相关表
         cursor.execute("""
@@ -228,11 +239,53 @@ class StorageManager:
             )
         """)
 
+        # 通用页面/文档快照表
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS surface_snapshots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                url TEXT NOT NULL,
+                name TEXT NOT NULL,
+                category TEXT NOT NULL,
+                final_url TEXT,
+                title TEXT,
+                last_modified TEXT,
+                etag TEXT,
+                content_type TEXT,
+                status_code INTEGER,
+                html_hash TEXT,
+                text_hash TEXT,
+                signals_json TEXT,
+                normalized_text TEXT,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS competitor_snapshots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                vendor TEXT NOT NULL,
+                name TEXT NOT NULL,
+                url TEXT NOT NULL,
+                category TEXT NOT NULL,
+                final_url TEXT,
+                title TEXT,
+                last_modified TEXT,
+                etag TEXT,
+                content_type TEXT,
+                status_code INTEGER,
+                html_hash TEXT,
+                signals_json TEXT,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_changes_history_type ON changes_history(change_type)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_commit_history_id ON commit_history(commit_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_legal_docs_name ON legal_docs(doc_name)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_github_releases_repo ON github_releases(repo_name)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_status_incidents_id ON status_incidents(incident_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_surface_snapshots_url ON surface_snapshots(url)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_competitor_snapshots_url ON competitor_snapshots(url)")
 
         self.conn.commit()
 
@@ -244,6 +297,10 @@ class StorageManager:
             file_hash: 文件 hash
             url: 文件 URL
         """
+        # 去重：如果 hash 未变化，跳过插入
+        last = await self.get_last_resource_hash(filename)
+        if last and last["hash"] == file_hash:
+            return
         cursor = self.conn.cursor()
         cursor.execute("""
             INSERT INTO resource_hashes (filename, hash, url)
@@ -288,6 +345,67 @@ class StorageManager:
         """, (filename, json.dumps(patterns, ensure_ascii=False)))
         self.conn.commit()
 
+    async def save_bundle_insights(self, filename: str, bundle_type: str, insights: Dict):
+        """保存 bundle 深度分析结果。若内容未变则跳过。"""
+        last = await self.get_last_bundle_insights(filename)
+        if last:
+            last_str = json.dumps(last["insights"], ensure_ascii=False, sort_keys=True)
+            curr_str = json.dumps(insights, ensure_ascii=False, sort_keys=True)
+            if last_str == curr_str:
+                return
+
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            INSERT INTO bundle_insights (filename, bundle_type, insights)
+            VALUES (?, ?, ?)
+        """, (filename, bundle_type, json.dumps(insights, ensure_ascii=False, default=str)))
+        self.conn.commit()
+
+    async def get_last_bundle_insights(self, filename: str) -> Optional[Dict]:
+        """获取某个 bundle 最近一次分析结果。"""
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            SELECT filename, bundle_type, insights, timestamp
+            FROM bundle_insights
+            WHERE filename = ?
+            ORDER BY timestamp DESC
+            LIMIT 1
+        """, (filename,))
+        row = cursor.fetchone()
+        if not row:
+            return None
+        return {
+            "filename": row["filename"],
+            "bundle_type": row["bundle_type"],
+            "insights": json.loads(row["insights"]),
+            "timestamp": row["timestamp"],
+        }
+
+    async def get_latest_bundle_insights(self, limit: int = 20) -> List[Dict]:
+        """获取每个 bundle 文件的最新分析结果。"""
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            SELECT b1.filename, b1.bundle_type, b1.insights, b1.timestamp
+            FROM bundle_insights b1
+            JOIN (
+                SELECT filename, MAX(id) AS max_id
+                FROM bundle_insights
+                GROUP BY filename
+            ) b2 ON b1.id = b2.max_id
+            ORDER BY b1.timestamp DESC
+            LIMIT ?
+        """, (limit,))
+
+        rows = []
+        for row in cursor.fetchall():
+            rows.append({
+                "filename": row["filename"],
+                "bundle_type": row["bundle_type"],
+                "insights": json.loads(row["insights"]),
+                "timestamp": row["timestamp"],
+            })
+        return rows
+
     async def get_last_code_patterns(self, filename: str) -> Optional[Dict]:
         """获取最近的代码模式
 
@@ -321,11 +439,18 @@ class StorageManager:
         Args:
             config: 配置字典
         """
+        # 去重：如果配置内容未变化，跳过插入
+        last = await self.get_last_model_config()
+        if last:
+            last_str = json.dumps(last["config"], ensure_ascii=False, sort_keys=True)
+            curr_str = json.dumps(config, ensure_ascii=False, sort_keys=True)
+            if last_str == curr_str:
+                return
         cursor = self.conn.cursor()
         cursor.execute("""
             INSERT INTO model_configs (config)
             VALUES (?)
-        """, (json.dumps(config, ensure_ascii=False, default=str),))
+        """, (json.dumps(config, ensure_ascii=False, sort_keys=True, default=str),))
         self.conn.commit()
 
     async def get_last_model_config(self) -> Optional[Dict]:
@@ -338,7 +463,7 @@ class StorageManager:
         cursor.execute("""
             SELECT config, timestamp
             FROM model_configs
-            ORDER BY timestamp DESC
+            ORDER BY id DESC
             LIMIT 1
         """)
 
@@ -373,7 +498,7 @@ class StorageManager:
         cursor.execute("""
             SELECT endpoints, timestamp
             FROM api_endpoints
-            ORDER BY timestamp DESC
+            ORDER BY id DESC
             LIMIT 1
         """)
 
@@ -463,10 +588,19 @@ class StorageManager:
             VALUES (?, ?)
         """, ("full", json.dumps(results, ensure_ascii=False, default=str)))
 
-        # 保存变化记录
-        changes = results.get("checks", {}).get("frontend", {}).get("changes", [])
-        changes.extend(results.get("checks", {}).get("config", {}).get("changes", []))
-        changes.extend(results.get("checks", {}).get("behavior", {}).get("changes", []))
+        # 保存变化记录。兼容两种结构：
+        # 1. scripts/monitor.py 的 {"checks": {...}}
+        # 2. web/api_check 的扁平 {"changes": [...]}
+        changes = []
+        if "checks" in results:
+            changes.extend(results.get("checks", {}).get("frontend", {}).get("changes", []))
+            changes.extend(results.get("checks", {}).get("config", {}).get("changes", []))
+            changes.extend(results.get("checks", {}).get("behavior", {}).get("changes", []))
+            changes.extend(results.get("checks", {}).get("official", {}).get("changes", []))
+            changes.extend(results.get("checks", {}).get("github", {}).get("changes", []))
+            changes.extend(results.get("checks", {}).get("status", {}).get("changes", []))
+        else:
+            changes.extend(results.get("changes", []))
 
         for change in changes:
             cursor.execute("""
@@ -577,7 +711,21 @@ class StorageManager:
         # 检查是否与上次相同
         last = await self.get_last_commit()
         if last and last["commit_id"] == commit_id:
-            return False  # 无变化
+            needs_update = any([
+                commit_datetime and commit_datetime != last.get("commit_datetime"),
+                package_version and package_version != last.get("package_version"),
+                api_version and api_version != last.get("api_version"),
+            ])
+            if needs_update:
+                cursor.execute("""
+                    UPDATE commit_history
+                    SET commit_datetime = COALESCE(?, commit_datetime),
+                        package_version = COALESCE(?, package_version),
+                        api_version = COALESCE(?, api_version)
+                    WHERE id = ?
+                """, (commit_datetime, package_version, api_version, last["id"]))
+                self.conn.commit()
+            return False  # 无新的 commit id
 
         cursor.execute("""
             INSERT INTO commit_history (commit_id, commit_datetime, package_version, api_version)
@@ -590,7 +738,7 @@ class StorageManager:
         """获取最近的 commit 信息"""
         cursor = self.conn.cursor()
         cursor.execute("""
-            SELECT commit_id, commit_datetime, package_version, api_version, timestamp
+            SELECT id, commit_id, commit_datetime, package_version, api_version, timestamp
             FROM commit_history
             ORDER BY timestamp DESC
             LIMIT 1
@@ -667,6 +815,10 @@ class StorageManager:
             etag: ETag 头的值
             content_length: 内容长度
         """
+        # 去重：如果 last_modified 未变化，跳过插入
+        last = await self.get_last_cdn_resource(filename)
+        if last and last["last_modified"] == last_modified:
+            return
         cursor = self.conn.cursor()
         cursor.execute("""
             INSERT INTO cdn_resources (filename, last_modified, etag, content_length)
@@ -795,18 +947,51 @@ class StorageManager:
             incident: 事件字典
         """
         cursor = self.conn.cursor()
+        incident_id = incident.get("id", "")
+        title = incident.get("title", incident.get("name", ""))
+        impact = incident.get("impact", "")
+        components = json.dumps(incident.get("components", []), ensure_ascii=False)
+        status = incident.get("status", incident.get("timeline", [{}])[-1].get("status", "") if incident.get("timeline") else "")
+        created_at = incident.get("created_at", incident.get("published", ""))
+        resolved_at = incident.get("resolved_at", incident.get("updated", ""))
+
         cursor.execute("""
-            INSERT OR IGNORE INTO status_incidents
+            INSERT INTO status_incidents
             (incident_id, title, impact, components, status, created_at, resolved_at)
             VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(incident_id) DO UPDATE SET
+                title = CASE
+                    WHEN COALESCE(status_incidents.title, '') = '' THEN excluded.title
+                    ELSE status_incidents.title
+                END,
+                impact = CASE
+                    WHEN COALESCE(status_incidents.impact, '') = '' THEN excluded.impact
+                    ELSE status_incidents.impact
+                END,
+                components = CASE
+                    WHEN COALESCE(status_incidents.components, '') IN ('', '[]') THEN excluded.components
+                    ELSE status_incidents.components
+                END,
+                status = CASE
+                    WHEN COALESCE(status_incidents.status, '') = '' THEN excluded.status
+                    ELSE status_incidents.status
+                END,
+                created_at = CASE
+                    WHEN COALESCE(status_incidents.created_at, '') = '' THEN excluded.created_at
+                    ELSE status_incidents.created_at
+                END,
+                resolved_at = CASE
+                    WHEN COALESCE(status_incidents.resolved_at, '') = '' THEN excluded.resolved_at
+                    ELSE status_incidents.resolved_at
+                END
         """, (
-            incident.get("id", ""),
-            incident.get("title", ""),
-            incident.get("impact", ""),
-            json.dumps(incident.get("components", []), ensure_ascii=False),
-            incident.get("status", ""),
-            incident.get("created_at", ""),
-            incident.get("resolved_at", ""),
+            incident_id,
+            title,
+            impact,
+            components,
+            status,
+            created_at,
+            resolved_at,
         ))
         self.conn.commit()
 
@@ -840,6 +1025,169 @@ class StorageManager:
 
         return incidents
 
+    async def save_surface_snapshot(self, url: str, name: str, category: str, snapshot: Dict):
+        """保存页面/文档快照。若核心签名未变化则跳过。"""
+        last = await self.get_last_surface_snapshot(url)
+        if last:
+            same_signature = (
+                last.get("final_url") == snapshot.get("final_url")
+                and last.get("last_modified") == snapshot.get("last_modified")
+                and last.get("etag") == snapshot.get("etag")
+                and last.get("html_hash") == snapshot.get("html_hash")
+                and last.get("text_hash") == snapshot.get("text_hash")
+            )
+            if same_signature:
+                return
+
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            INSERT INTO surface_snapshots (
+                url, name, category, final_url, title, last_modified, etag,
+                content_type, status_code, html_hash, text_hash, signals_json, normalized_text
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            url,
+            name,
+            category,
+            snapshot.get("final_url"),
+            snapshot.get("title"),
+            snapshot.get("last_modified"),
+            snapshot.get("etag"),
+            snapshot.get("content_type"),
+            snapshot.get("status_code"),
+            snapshot.get("html_hash"),
+            snapshot.get("text_hash"),
+            json.dumps(snapshot.get("signals", {}), ensure_ascii=False, default=str),
+            snapshot.get("normalized_text", ""),
+        ))
+        self.conn.commit()
+
+    async def get_last_surface_snapshot(self, url: str) -> Optional[Dict]:
+        """获取某个 URL 最近一次快照。"""
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            SELECT *
+            FROM surface_snapshots
+            WHERE url = ?
+            ORDER BY id DESC
+            LIMIT 1
+        """, (url,))
+        row = cursor.fetchone()
+        if not row:
+            return None
+
+        snapshot = dict(row)
+        try:
+            snapshot["signals"] = json.loads(snapshot.pop("signals_json") or "{}")
+        except (json.JSONDecodeError, TypeError):
+            snapshot["signals"] = {}
+        return snapshot
+
+    async def get_latest_surface_snapshots(self, limit: int = 50) -> List[Dict]:
+        """获取每个 URL 的最新快照。"""
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            SELECT s1.*
+            FROM surface_snapshots s1
+            JOIN (
+                SELECT url, MAX(id) AS max_id
+                FROM surface_snapshots
+                GROUP BY url
+            ) s2 ON s1.id = s2.max_id
+            ORDER BY s1.timestamp DESC
+            LIMIT ?
+        """, (limit,))
+
+        rows = []
+        for row in cursor.fetchall():
+            item = dict(row)
+            try:
+                item["signals"] = json.loads(item.pop("signals_json") or "{}")
+            except (json.JSONDecodeError, TypeError):
+                item["signals"] = {}
+            rows.append(item)
+        return rows
+
+    async def save_competitor_snapshot(self, vendor: str, name: str, url: str, category: str, snapshot: Dict):
+        last = await self.get_last_competitor_snapshot(url)
+        if last:
+            same_signature = (
+                last.get("final_url") == snapshot.get("final_url")
+                and last.get("last_modified") == snapshot.get("last_modified")
+                and last.get("etag") == snapshot.get("etag")
+                and last.get("html_hash") == snapshot.get("html_hash")
+                and json.dumps(last.get("signals", {}), ensure_ascii=False, sort_keys=True)
+                == json.dumps(snapshot.get("signals", {}), ensure_ascii=False, sort_keys=True)
+            )
+            if same_signature:
+                return
+
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            INSERT INTO competitor_snapshots (
+                vendor, name, url, category, final_url, title, last_modified,
+                etag, content_type, status_code, html_hash, signals_json
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            vendor,
+            name,
+            url,
+            category,
+            snapshot.get("final_url"),
+            snapshot.get("title"),
+            snapshot.get("last_modified"),
+            snapshot.get("etag"),
+            snapshot.get("content_type"),
+            snapshot.get("status_code"),
+            snapshot.get("html_hash"),
+            json.dumps(snapshot.get("signals", {}), ensure_ascii=False, default=str),
+        ))
+        self.conn.commit()
+
+    async def get_last_competitor_snapshot(self, url: str) -> Optional[Dict]:
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            SELECT *
+            FROM competitor_snapshots
+            WHERE url = ?
+            ORDER BY id DESC
+            LIMIT 1
+        """, (url,))
+        row = cursor.fetchone()
+        if not row:
+            return None
+        item = dict(row)
+        try:
+            item["signals"] = json.loads(item.pop("signals_json") or "{}")
+        except (json.JSONDecodeError, TypeError):
+            item["signals"] = {}
+        return item
+
+    async def get_latest_competitor_snapshots(self, limit: int = 50) -> List[Dict]:
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            SELECT c1.*
+            FROM competitor_snapshots c1
+            JOIN (
+                SELECT url, MAX(id) AS max_id
+                FROM competitor_snapshots
+                GROUP BY url
+            ) c2 ON c1.id = c2.max_id
+            ORDER BY c1.timestamp DESC
+            LIMIT ?
+        """, (limit,))
+        rows = []
+        for row in cursor.fetchall():
+            item = dict(row)
+            try:
+                item["signals"] = json.loads(item.pop("signals_json") or "{}")
+            except (json.JSONDecodeError, TypeError):
+                item["signals"] = {}
+            rows.append(item)
+        return rows
+
     async def cleanup_old_data(self, retention_days: int = 90):
         """清理旧数据
 
@@ -855,6 +1203,7 @@ class StorageManager:
         tables = [
             "resource_hashes",
             "code_patterns",
+            "bundle_insights",
             "model_configs",
             "api_endpoints",
             "test_results",
@@ -865,6 +1214,7 @@ class StorageManager:
             "cdn_resources",
             "github_snapshots",
             "status_snapshots",
+            "competitor_snapshots",
         ]
 
         for table in tables:

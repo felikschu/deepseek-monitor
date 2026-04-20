@@ -83,6 +83,15 @@ tr:hover td{background:rgba(255,255,255,.03)}
 .modal table td{padding:4px 8px}
 .flag-desc{display:none;font-size:11px;color:var(--text-dim);margin-top:4px;padding:6px 8px;background:rgba(255,255,255,.03);border-radius:4px;line-height:1.5}
 .flag-desc.show{display:block}
+.signal-grid{display:grid;grid-template-columns:1.2fr 1fr;gap:12px}
+.signal-box{border:1px solid var(--border);border-radius:8px;padding:12px;background:rgba(255,255,255,.02)}
+.signal-box h3{font-size:12px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.4px;margin-bottom:8px}
+.signal-list{display:flex;flex-wrap:wrap;gap:6px}
+.signal-chip{display:inline-flex;align-items:center;padding:4px 8px;border-radius:999px;background:#202638;color:var(--text);font-size:12px;line-height:1.4}
+.signal-note{font-size:12px;color:var(--text-dim);line-height:1.7}
+@media (max-width: 900px){
+  .signal-grid{grid-template-columns:1fr}
+}
 </style>
 </head>
 <body>
@@ -102,7 +111,7 @@ tr:hover td{background:rgba(255,255,255,.03)}
     <h3>&#x2699; 设置</h3>
     <div class="help-section">
       <h4>自动检查间隔</h4>
-      <p style="font-size:12px;color:var(--text-dim);margin-bottom:12px">设置系统自动检查的时间间隔（需要重启服务器后生效）</p>
+      <p style="font-size:12px;color:var(--text-dim);margin-bottom:12px">设置当前进程内的自动检查间隔。不会写回配置文件，会在下一个检查周期开始后生效。</p>
       <div id="intervalOptions" style="display:flex;flex-direction:column;gap:8px">
         <!-- 选项会通过 JS 动态生成 -->
       </div>
@@ -131,8 +140,8 @@ tr:hover td{background:rgba(255,255,255,.03)}
 </div>
 
 <div class="stats-bar">
-  <div class="stat"><div class="label">总变更</div><div class="value green" id="statTotal">0</div></div>
-  <div class="stat"><div class="label">7天变更</div><div class="value orange" id="statWeek">0</div></div>
+  <div class="stat"><div class="label">总记录</div><div class="value green" id="statTotal">0</div></div>
+  <div class="stat"><div class="label">7天事件</div><div class="value orange" id="statWeek">0</div></div>
   <div class="stat"><div class="label">Feature Flags</div><div class="value purple" id="statFlags">0</div></div>
   <div class="stat"><div class="label">GitHub 仓库</div><div class="value cyan" id="statGHRepos">0</div></div>
 </div>
@@ -172,6 +181,52 @@ tr:hover td{background:rgba(255,255,255,.03)}
     </table>
   </div>
 
+  <!-- Bundle 深挖 -->
+  <div class="card full">
+    <h2>
+      <span class="left">DeepSeek 网页动向 <span class="badge" id="webSignalCount">0</span></span>
+      <button class="btn-help" onclick="showHelp('websignals')" title="网页动向说明">?</button>
+    </h2>
+    <div id="webSignalsPanel" class="signal-grid">
+      <div class="empty-state">暂无网页动向摘要，点击「立即检查」生成</div>
+    </div>
+  </div>
+
+  <!-- Bundle 深挖 -->
+  <div class="card full">
+    <h2>
+      <span class="left">Bundle 深挖 <span class="badge" id="bundleCount">0</span></span>
+      <button class="btn-help" onclick="showHelp('bundles')" title="Bundle 深挖说明">?</button>
+    </h2>
+    <table>
+      <thead><tr><th>文件</th><th>角色</th><th>关键信号</th><th>样本</th></tr></thead>
+      <tbody id="bundleBody"></tbody>
+    </table>
+  </div>
+
+  <!-- 高信号摘要 -->
+  <div class="card full">
+    <h2>
+      <span class="left">最近 7 天高信号更新 <span class="badge" id="highlightCount">0</span></span>
+      <button class="btn-help" onclick="showHelp('highlights')" title="高信号摘要说明">?</button>
+    </h2>
+    <div class="changes-list" id="highlightsList">
+      <div class="empty-state">暂无高信号更新</div>
+    </div>
+  </div>
+
+  <!-- 竞品侦察 -->
+  <div class="card full">
+    <h2>
+      <span class="left">竞品型号/商业化侦察 <span class="badge" id="competitorCount">0</span></span>
+      <button class="btn-help" onclick="showHelp('competitors')" title="竞品侦察说明">?</button>
+    </h2>
+    <table>
+      <thead><tr><th>站点</th><th>厂商</th><th>最近型号</th><th>商业化/版本信号</th></tr></thead>
+      <tbody id="competitorBody"></tbody>
+    </table>
+  </div>
+
   <!-- 变更记录 -->
   <div class="card full">
     <h2>
@@ -184,8 +239,12 @@ tr:hover td{background:rgba(255,255,255,.03)}
         <button onclick="filterChanges('resource_change',this)">资源</button>
         <button onclick="filterChanges('commit_change',this)">Commit</button>
         <button onclick="filterChanges('feature_flags_change',this)">Flags</button>
+        <button onclick="filterChanges('model_configs_change',this)">Models</button>
         <button onclick="filterChanges('legal_doc_update',this)">法律</button>
         <button onclick="filterChanges('cdn_update',this)">CDN</button>
+        <button onclick="filterChanges('surface_change',this)">官网/文档</button>
+        <button onclick="filterChanges('bundle_insights_change',this)">Bundle</button>
+        <button onclick="filterChanges('competitor_model_change',this)">竞品型号</button>
         <button onclick="filterChanges('new_repo',this)">GitHub</button>
         <button onclick="filterChanges('status',this)">Status</button>
       </div>
@@ -216,8 +275,20 @@ tr:hover td{background:rgba(255,255,255,.03)}
       <button class="btn-help" onclick="showHelp('legal')" title="法律文档说明">?</button>
     </h2>
     <table>
-      <thead><tr><th>文档</th><th>Last-Modified</th><th>记录时间</th></tr></thead>
+      <thead><tr><th>文档</th><th>官方更新时间</th><th>本地记录时间</th></tr></thead>
       <tbody id="legalBody"></tbody>
+    </table>
+  </div>
+
+  <!-- 官网/文档页面 -->
+  <div class="card full">
+    <h2>
+      <span class="left">官网与文档页 <span class="badge" id="surfaceCount">0</span></span>
+      <button class="btn-help" onclick="showHelp('surfaces')" title="官网/文档页说明">?</button>
+    </h2>
+    <table>
+      <thead><tr><th>页面</th><th>类型</th><th>官方更新时间</th><th>文本/资源信号</th></tr></thead>
+      <tbody id="surfaceBody"></tbody>
     </table>
   </div>
 
@@ -264,7 +335,7 @@ tr:hover td{background:rgba(255,255,255,.03)}
     </h2>
     <div id="ghReposPanel">
       <table>
-        <thead><tr><th>仓库</th><th>说明</th><th>Stars</th><th>语言</th><th>最近推送</th></tr></thead>
+        <thead><tr><th>仓库</th><th>说明</th><th>Stars</th><th>语言</th><th>最近活动 (pushed_at)</th></tr></thead>
         <tbody id="ghReposBody"></tbody>
       </table>
     </div>
@@ -315,6 +386,12 @@ function gmtToBJ(gmt) {
   return d.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false });
 }
 
+function formatAnyTime(ts) {
+  if (!ts) return '---';
+  if (typeof ts === 'string' && (ts.includes('GMT') || ts.includes(','))) return gmtToBJ(ts);
+  return toBJ(ts);
+}
+
 function timeAgo(ts) {
   if (!ts) return '---';
   if (!ts.includes('Z') && !ts.includes('+')) ts += 'Z';
@@ -335,9 +412,12 @@ const HELP = {
       <h4>这是什么？</h4>
       <p>本系统用于<strong>追踪 DeepSeek 的变化</strong>。它监控以下数据源：</p>
       <ul style="margin-left:20px;line-height:1.8">
+        <li><code>www.deepseek.com</code> — 官网主站与页面入口</li>
+        <li><code>api-docs.deepseek.com</code> — API 文档、news、pricing、sitemap</li>
         <li><code>chat.deepseek.com</code> — 网页端前端代码</li>
         <li><code>status.deepseek.com</code> — 官方状态页面</li>
         <li><code>github.com/deepseek-ai</code> — 开源仓库动态</li>
+        <li><code>zhipuai.cn</code> / <code>open.bigmodel.cn</code> / <code>minimax.io</code> — 竞品型号与商业化动作</li>
       </ul>
     </div>
     <div class="help-section">
@@ -345,9 +425,16 @@ const HELP = {
       <p><strong>commit-id</strong> — DeepSeek 网页 HTML 中嵌有 <code>&lt;meta name="commit-id"&gt;</code>，每次前端代码更新都会变，是最直接的版本信号。</p>
       <p><strong>JS 文件 hash</strong> — CDN 上的 JS/CSS 文件名包含 hash（如 <code>main.cd620c850b.js</code>），hash 变了 = 文件内容变了。</p>
       <p><strong>Feature Flags</strong> — 前端代码中有 <code>getFeature("xxx", default)</code> 调用，这些 flag 由服务端远程控制，可以随时开关功能而不用发新版。</p>
+      <p><strong>官网/文档页</strong> — 对源码做结构化侦察：title、meta、脚本、样式、链接图谱、正文、sitemap，补足“只盯 main.js”带来的盲区。</p>
       <p><strong>法律文档</strong> — Terms of Use 和 Privacy Policy 的 Last-Modified 头。DeepSeek 通常在重大变更前更新法律文档（如 2026年3月27日更新 → 3月29日宕机升级）。</p>
       <p><strong>Status Page</strong> — 爬取官方状态页面的 Atom Feed，获取服务状态和历史故障事件（包含详细时间线）。</p>
       <p><strong>GitHub</strong> — 监控 deepseek-ai 组织的仓库创建、代码推送、Release 发布。</p>
+    </div>
+    <div class="help-section">
+      <h4>网页动向板块怎么看？</h4>
+      <p><strong>公开面</strong> 看官网/文档当前正式表达了什么，比如 agents、API Pricing、公开型号。</p>
+      <p><strong>源码隐藏面</strong> 看 JS bundle 已经埋了什么产品结构，比如 coder 路由、vision 模型选择、Agent Session 路由和 API 家族。</p>
+      <p>这两块合起来，才更接近“DeepSeek 最近网页真实动向”。</p>
     </div>
     <div class="help-section">
       <h4>发现的历史事件</h4>
@@ -361,7 +448,7 @@ const HELP = {
     <h3>&#x1F4C8; 事件时间线</h3>
     <div class="help-section">
       <h4>这个图表是什么？</h4>
-      <p>横轴是日期（北京时间），纵轴是当天检测到的变化数量。折线越高 = 当天变化越多。</p>
+      <p>横轴是日期（北京时间），优先使用变化自身携带的<strong>官方时间</strong>（如 Last-Modified、published_at）；没有官方时间时才回退到本地发现时间。</p>
     </div>
     <div class="help-section">
       <h4>怎么用？</h4>
@@ -405,6 +492,62 @@ const HELP = {
     <div class="help-section">
       <h4>上传时间</h4>
       <p>CDN 返回的 <code>Last-Modified</code> 头，代表文件被上传到 CDN 的时间。如果所有文件的上传时间完全一致到秒，说明是一次统一的部署操作。</p>
+    </div>
+  `,
+  bundles: `
+    <h3>&#x1F9E9; Bundle 深挖</h3>
+    <div class="help-section">
+      <h4>这三类文件分别代表什么？</h4>
+      <p><code>default-vendors.*.js</code> 主要是第三方依赖和运行时；<code>main.*.js</code> 主要是 DeepSeek 自己的业务逻辑、API、feature flag；<code>main.*.css</code> 主要是组件样式、设计 token 和界面结构。</p>
+    </div>
+    <div class="help-section">
+      <h4>这个面板会提取什么？</h4>
+      <p>会提取 API 端点数量、feature flag、语言包数量、第三方依赖线索、CSS 类名、CSS 变量，以及搜索/上传/captcha/session 等能力线索。</p>
+    </div>
+    <div class="help-section">
+      <h4>为什么重要？</h4>
+      <p>这样你看到的就不再只是“文件更新了”，而是“更新主要发生在依赖层、业务能力层还是 UI 层”，并能快速判断是否涉及 API、新能力或风控策略变化。</p>
+    </div>
+  `,
+  websignals: `
+    <h3>&#x1F4F0; DeepSeek 网页动向</h3>
+    <div class="help-section">
+      <h4>为什么单独做这个板块？</h4>
+      <p>因为 DeepSeek 很多重要变化不是直接发公告，而是先体现在官网文案、前端路由、bundle 里的能力结构上。</p>
+    </div>
+    <div class="help-section">
+      <h4>公开面</h4>
+      <p>来自官网主页、API 文档、pricing 页面和其同源脚本，适合看当前正式对外表达。</p>
+    </div>
+    <div class="help-section">
+      <h4>源码隐藏面</h4>
+      <p>来自 chat bundle 的语义抽取，重点看 <code>coder / vision / agent / api / pricing</code> 五类结构化线索。</p>
+    </div>
+  `,
+  highlights: `
+    <h3>&#x1F525; 高信号摘要</h3>
+    <div class="help-section">
+      <h4>这是什么？</h4>
+      <p>这个面板只展示最近 7 天内更值得关注的变化，例如前端部署、模型配置变化、官网/文档更新、法律文档更新、GitHub Release、Status 事件等。</p>
+    </div>
+    <div class="help-section">
+      <h4>为什么单独做？</h4>
+      <p>完整变更流里会混入很多低价值噪音。这个面板会主动过滤掉类似 CDN 头信息抖动这类低信号记录，优先保留真正值得读的东西。</p>
+    </div>
+  `,
+  competitors: `
+    <h3>&#x1F50E; 竞品模型侦察</h3>
+    <div class="help-section">
+      <h4>重点看什么？</h4>
+      <p>这个面板不做泛泛爬站，重点抽取智谱和 MiniMax 官网、开放平台、定价文档、新闻页中的模型型号、价格、套餐、商业化入口、官网版本号、新闻 slug 与日期信号。</p>
+    </div>
+    <div class="help-section">
+      <h4>为什么重要？</h4>
+      <p>像 <code>GLM-5.1</code>、<code>MiniMax M2.7</code> 这种新型号，以及 <code>Token Plan</code>、<code>Coding Plan</code>、<code>龙虾套餐</code>、<code>Code Interpreter</code> 这类赚钱业务入口，往往比普通官网改版更重要。</p>
+    </div>
+    <div class="help-section">
+      <h4>怎么看最后一列？</h4>
+      <p>优先显示价格/套餐/商业化信号；如果没有，再回退显示官网版本号和日期。这样你能直接看出对方是在发新模型，还是在推新的收费产品。</p>
     </div>
   `,
   changes: `
@@ -464,6 +607,22 @@ const HELP = {
       <p>所以当这个面板出现变化时，建议密切关注接下来的 1-3 天。</p>
     </div>
   `,
+  surfaces: `
+    <h3>&#x1F30D; 官网与文档页</h3>
+    <div class="help-section">
+      <h4>为什么要单独监控这个面板？</h4>
+      <p>很多变化不会直接出现在 <code>chat.deepseek.com</code> 的前端包里，但会先出现在官网、下载页、API 文档、news 列表或 sitemap 中。</p>
+    </div>
+    <div class="help-section">
+      <h4>侦察方法</h4>
+      <p>每次抓取时会同时记录：HTTP 头、标题、meta、脚本/样式资源、站内链接、可见正文，以及 sitemap URL 列表。</p>
+      <p>如果页面更新，系统会生成简要证据，例如“新增 news 链接”“新增 pricing 文案”“Sitemap 增加 URL”。</p>
+    </div>
+    <div class="help-section">
+      <h4>时间语义</h4>
+      <p><strong>官方更新时间</strong> 来自页面的 <code>Last-Modified</code>；<strong>本地发现时间</strong> 是 monitor 实际拉取到变化的时间。两者不会混用。</p>
+    </div>
+  `,
   github: `
     <h3>&#x1F4BB; GitHub 监控 (deepseek-ai)</h3>
     <div class="help-section">
@@ -474,7 +633,7 @@ const HELP = {
       <h4>监控内容</h4>
       <table>
         <tr><td><strong>新仓库</strong></td><td>deepseek-ai 创建了新的公开仓库（如 2025年初集中发布 V3/R1 系列）</td></tr>
-        <tr><td><strong>代码推送</strong></td><td>仓库有新 commit 推送（pushed_at 变化）</td></tr>
+        <tr><td><strong>仓库活动</strong></td><td>仓库级 <code>pushed_at</code> 变化，表示仓库近期有活动，但不一定等于默认分支新增公开 commit</td></tr>
         <tr><td><strong>Release/Tag</strong></td><td>新版本发布，通常伴随模型权重更新或重大功能更新</td></tr>
         <tr><td><strong>Star 数变化</strong></td><td>Star 数涨幅超过 5% 时记录（如 R1 发布后暴涨）</td></tr>
       </table>
@@ -567,7 +726,7 @@ async function updateInterval(minutes) {
     if (data.status === 'ok') {
       currentSettings.check_interval_minutes = minutes;
       updateSettingsUI();
-      showToast(`检查间隔已设置为 ${minutes} 分钟（下次启动生效）`, 'success');
+      showToast(`检查间隔已设置为 ${minutes} 分钟（当前进程内有效，下个检查周期使用）`, 'success');
     } else {
       showToast('设置失败: ' + (data.message || '未知错误'), 'error');
     }
@@ -589,10 +748,16 @@ function closeSettings() {
 document.getElementById('helpModal').addEventListener('click', function(e) {
   if (e.target === this) closeHelp();
 });
+document.getElementById('settingsModal').addEventListener('click', function(e) {
+  if (e.target === this) closeSettings();
+});
 
 // ESC 关闭
 document.addEventListener('keydown', function(e) {
-  if (e.key === 'Escape') closeHelp();
+  if (e.key === 'Escape') {
+    closeHelp();
+    closeSettings();
+  }
 });
 
 /* ── 基础工具 ── */
@@ -605,7 +770,11 @@ function showToast(msg, type='info') {
 
 async function fetchJSON(url) {
   const r = await fetch(API + url);
-  return r.json();
+  const data = await r.json();
+  if (!r.ok) {
+    throw new Error(data.message || `HTTP ${r.status}`);
+  }
+  return data;
 }
 
 /* ── 数据加载 ── */
@@ -641,16 +810,25 @@ async function loadTimeline() {
 
     const colors = {
       resource_change:'#4a9eff', commit_change:'#4caf50',
-      feature_flags_change:'#ab47bc', legal_doc_update:'#ff9800',
-      new_resource:'#26c6da', cdn_update:'#ef5350',
-      api_endpoints_change:'#66bb6a', new_feature:'#42a5f5'
+      feature_flags_change:'#ab47bc', model_configs_change:'#ff7043',
+      legal_doc_update:'#ff9800', new_resource:'#26c6da',
+      cdn_update:'#ef5350', api_endpoints_change:'#66bb6a',
+      new_feature:'#42a5f5', surface_change:'#8d6e63',
+      competitor_model_change:'#7cb342',
+      repo_push:'#5c6bc0', new_release:'#26a69a', new_repo:'#7e57c2',
+      stars_change:'#fbc02d', new_incident:'#ef5350', status_change:'#78909c'
     };
 
     const typeNames = {
       resource_change:'资源变化', commit_change:'Commit 变化',
-      feature_flags_change:'Flags 变化', legal_doc_update:'法律文档',
-      new_resource:'新资源', cdn_update:'CDN 更新',
-      api_endpoints_change:'端点变化', new_feature:'新功能'
+      feature_flags_change:'Flags 变化', model_configs_change:'模型配置',
+      legal_doc_update:'法律文档', new_resource:'新资源',
+      cdn_update:'CDN 更新', api_endpoints_change:'端点变化',
+      new_feature:'新功能', surface_change:'官网/文档页',
+      competitor_model_change:'竞品型号',
+      repo_push:'GitHub 活动', new_release:'GitHub Release',
+      new_repo:'新仓库', stars_change:'Stars 变化',
+      new_incident:'Status 事件', status_change:'Status 状态'
     };
 
     const datasets = [{
@@ -780,7 +958,9 @@ async function loadChanges() {
 
 function renderChanges(changes) {
   const list = document.getElementById('changesList');
-  const filtered = currentFilter === 'all' ? changes : changes.filter(c => c.change_type === currentFilter);
+  const filtered = currentFilter === 'all'
+    ? changes
+    : changes.filter(c => matchesChangeFilter(c.change_type, currentFilter));
 
   if (!filtered.length) {
     list.innerHTML = '<div class="empty-state">暂无此类变更</div>';
@@ -789,10 +969,13 @@ function renderChanges(changes) {
 
   const icons = {
     resource_change: ['&#x1F4E6;','resource'], commit_change: ['&#x1F4BB;','commit'],
-    feature_flags_change: ['&#x1F3F7;','flag'], legal_doc_update: ['&#x1F4C4;','legal'],
+    feature_flags_change: ['&#x1F3F7;','flag'], model_configs_change: ['&#x1F504;','flag'],
+    legal_doc_update: ['&#x1F4C4;','legal'],
     new_resource: ['&#x2728;','resource'], cdn_update: ['&#x2601;','cdn'],
     api_endpoints_change: ['&#x1F517;','endpoint'], new_feature: ['&#x1F680;','endpoint'],
-    pattern_change: ['&#x1F50D;','resource'],
+    pattern_change: ['&#x1F50D;','resource'], surface_change: ['&#x1F30D;','resource'],
+    bundle_insights_change: ['&#x1F9E9;','resource'],
+    competitor_model_change: ['&#x1F50E;','resource'],
     new_repo: ['&#x1F4BB;','commit'], repo_push: ['&#x1F4BB;','commit'],
     new_release: ['&#x1F680;','endpoint'], stars_change: ['&#x2B50;','commit'],
     status_change: ['&#x1F4CA;','flag'], new_incident: ['&#x26A0;','legal'],
@@ -815,6 +998,13 @@ function renderChanges(changes) {
         break;
       case 'commit_change':
         title = `前端部署: ${d.old_commit?.slice(0,8)} → ${d.new_commit?.slice(0,8)}`;
+        metaTime = d.source_time ? `官方时间 ${formatAnyTime(d.source_time)}` : '';
+        break;
+      case 'model_configs_change':
+        title = 'Model Configs 变化';
+        const oldCount = d.old?.biz_data?.model_configs?.length ?? (d.old?.model_configs?.length ?? '-');
+        const newCount = d.new?.biz_data?.model_configs?.length ?? (d.new?.model_configs?.length ?? '-');
+        diff = `模型数: ${oldCount} → ${newCount}`;
         break;
       case 'feature_flags_change':
         const added = (d.added||[]).join(', ');
@@ -828,10 +1018,12 @@ function renderChanges(changes) {
       case 'legal_doc_update':
         title = `${d.doc_name} 更新`;
         diff = `${gmtToBJ(d.old_modified)} → ${gmtToBJ(d.new_modified)}`;
+        metaTime = d.source_time ? `官方时间 ${formatAnyTime(d.source_time)}` : '';
         break;
       case 'cdn_update':
         title = `CDN: ${d.filename}`;
         diff = `${gmtToBJ(d.old_modified)} → ${gmtToBJ(d.new_modified)}`;
+        metaTime = d.source_time ? `官方时间 ${formatAnyTime(d.source_time)}` : '';
         break;
       case 'api_endpoints_change':
         title = `API 端点变化`;
@@ -850,8 +1042,9 @@ function renderChanges(changes) {
         diff = d.description ? `描述: ${d.description}` : '';
         break;
       case 'repo_push':
-        title = `${d.repo_name} 有新提交`;
+        title = `${d.repo_name} 仓库活动`;
         diff = d.repo_url ? `<a href="${d.repo_url}/commits" target="_blank" style="color:var(--accent)">查看 commits</a>` : '';
+        metaTime = d.source_time ? `仓库活动时间 ${formatAnyTime(d.source_time)}` : '';
         break;
       case 'new_release':
         title = `${d.repo_name} 发布 ${d.tag}`;
@@ -866,14 +1059,34 @@ function renderChanges(changes) {
       case 'status_change':
         title = `${d.component_name} 状态变化`;
         diff = `${d.old_status} → ${d.new_status}`;
+        metaTime = d.source_time ? `快照时间 ${formatAnyTime(d.source_time)}` : '';
         break;
       case 'new_incident':
         title = `Status Page: ${d.title}`;
         diff = `影响: ${d.impact || '未知'} | 组件: ${(d.components || []).join(', ')}`;
+        metaTime = d.source_time ? `官方发布时间 ${formatAnyTime(d.source_time)}` : '';
+        break;
+      case 'surface_change':
+        title = `${d.surface_name || '页面'} 变化`;
+        diff = d.summary || '';
+        metaTime = d.source_time ? `官方时间 ${formatAnyTime(d.source_time)}` : '';
+        break;
+      case 'bundle_insights_change':
+        title = `${d.filename} 深度信号变化`;
+        diff = d.summary || '';
+        metaTime = d.source_time ? `源码时间 ${formatAnyTime(d.source_time)}` : '';
+        break;
+      case 'competitor_model_change':
+        title = `${d.vendor || '竞品'}: ${d.surface_name || '页面'} 新信号`;
+        diff = d.summary || '';
+        metaTime = d.source_time ? `官方时间 ${formatAnyTime(d.source_time)}` : '';
         break;
     }
 
-    const metaLine = metaTime || toBJ(c.timestamp);
+    const observedAt = d.observed_at || c.timestamp;
+    const metaLine = metaTime
+      ? `${metaTime} | 本地发现 ${toBJ(observedAt)}`
+      : `本地发现 ${toBJ(observedAt)}`;
     // 构建详情 HTML（点击展开）
     let detailHTML = '';
     if (c.change_type === 'new_release') {
@@ -899,6 +1112,7 @@ function renderChanges(changes) {
         <div><strong>仓库:</strong> <a href="${d.repo_url||'#'}" target="_blank" style="color:var(--accent)">${d.repo_name}</a></div>
         <div><strong>上次推送:</strong> ${toBJ(d.old_pushed)}</div>
         <div><strong>本次推送:</strong> ${toBJ(d.new_pushed)}</div>
+        ${d.summary ? `<div><strong>说明:</strong> ${d.summary}</div>` : ''}
         ${d.repo_url ? `<div><a href="${d.repo_url}/commits" target="_blank" style="color:var(--accent)">查看 commit 历史</a></div>` : ''}
       </div>`;
     } else if (c.change_type === 'stars_change') {
@@ -922,12 +1136,55 @@ function renderChanges(changes) {
         <div><strong>影响组件:</strong> ${(d.components || []).join(', ') || '未知'}</div>
         <div><strong>检测时间:</strong> ${toBJ(c.timestamp)}</div>
       </div>`;
-    } else if (d.description || d.note) {
+    } else if (c.change_type === 'surface_change') {
+      const evidence = Array.isArray(d.evidence) ? d.evidence : [];
+      detailHTML = `<div class="change-expand" style="display:none;margin-top:6px;padding:8px 10px;background:rgba(255,255,255,.03);border-radius:4px;font-size:12px;line-height:1.8">
+        <div><strong>页面:</strong> <a href="${d.final_url || d.url || '#'}" target="_blank" style="color:var(--accent)">${d.surface_name || d.url}</a></div>
+        ${d.category ? `<div><strong>类型:</strong> ${d.category}</div>` : ''}
+        ${d.summary ? `<div><strong>摘要:</strong> ${d.summary}</div>` : ''}
+        ${d.impact_guess ? `<div><strong>影响判断:</strong> ${d.impact_guess}</div>` : ''}
+        ${d.source_time ? `<div><strong>官方时间:</strong> ${formatAnyTime(d.source_time)}</div>` : ''}
+        <div><strong>本地发现:</strong> ${toBJ(observedAt)}</div>
+        ${evidence.length ? `<div style="margin-top:6px"><strong>证据:</strong>${evidence.map(item => `<div style="margin-top:2px">${item}</div>`).join('')}</div>` : ''}
+      </div>`;
+    } else if (c.change_type === 'bundle_insights_change') {
+      const evidence = Array.isArray(d.evidence) ? d.evidence : [];
+      detailHTML = `<div class="change-expand" style="display:none;margin-top:6px;padding:8px 10px;background:rgba(255,255,255,.03);border-radius:4px;font-size:12px;line-height:1.8">
+        <div><strong>文件:</strong> ${d.filename}</div>
+        ${d.bundle_role ? `<div><strong>角色:</strong> ${d.bundle_role}</div>` : ''}
+        ${d.source_time ? `<div><strong>源码时间:</strong> ${formatAnyTime(d.source_time)}</div>` : ''}
+        <div><strong>本地发现:</strong> ${toBJ(observedAt)}</div>
+        ${evidence.length ? `<div style="margin-top:6px"><strong>证据:</strong>${evidence.map(item => `<div style="margin-top:2px">${item}</div>`).join('')}</div>` : ''}
+      </div>`;
+    } else if (c.change_type === 'competitor_model_change') {
+      const evidence = Array.isArray(d.evidence) ? d.evidence : [];
+      detailHTML = `<div class="change-expand" style="display:none;margin-top:6px;padding:8px 10px;background:rgba(255,255,255,.03);border-radius:4px;font-size:12px;line-height:1.8">
+        <div><strong>厂商:</strong> ${d.vendor || '---'}</div>
+        <div><strong>页面:</strong> <a href="${d.final_url || d.url || '#'}" target="_blank" style="color:var(--accent)">${d.surface_name || d.url}</a></div>
+        ${Array.isArray(d.added_models) && d.added_models.length ? `<div><strong>新增型号:</strong> ${d.added_models.join(', ')}</div>` : ''}
+        ${Array.isArray(d.added_actions) && d.added_actions.length ? `<div><strong>商业动作解读:</strong> ${d.added_actions.join(' | ')}</div>` : ''}
+        ${Array.isArray(d.added_headlines) && d.added_headlines.length ? `<div><strong>标题线索:</strong> ${d.added_headlines.join(' | ')}</div>` : ''}
+        ${Array.isArray(d.added_offerings) && d.added_offerings.length ? `<div><strong>新增商业化入口:</strong> ${d.added_offerings.join(', ')}</div>` : ''}
+        ${Array.isArray(d.added_versions) && d.added_versions.length ? `<div><strong>版本信号:</strong> ${d.added_versions.join(', ')}</div>` : ''}
+        ${Array.isArray(d.added_prices) && d.added_prices.length ? `<div><strong>新增价格:</strong> ${d.added_prices.join(', ')}</div>` : ''}
+        ${Array.isArray(d.added_pricing_paths) && d.added_pricing_paths.length ? `<div><strong>定价路径:</strong> ${d.added_pricing_paths.join(', ')}</div>` : ''}
+        ${Array.isArray(d.added_links) && d.added_links.length ? `<div><strong>新增可疑链接:</strong> ${d.added_links.join(' | ')}</div>` : ''}
+        ${Array.isArray(d.added_pricing_lines) && d.added_pricing_lines.length ? `<div><strong>定价明细:</strong> ${d.added_pricing_lines.join(' | ')}</div>` : ''}
+        ${Array.isArray(d.added_plan_signals) && d.added_plan_signals.length ? `<div><strong>套餐线索:</strong> ${d.added_plan_signals.join(' | ')}</div>` : ''}
+        ${Array.isArray(d.added_dates) && d.added_dates.length ? `<div><strong>日期信号:</strong> ${d.added_dates.join(', ')}</div>` : ''}
+        ${d.source_time ? `<div><strong>页面时间:</strong> ${formatAnyTime(d.source_time)}</div>` : ''}
+        <div><strong>本地发现:</strong> ${toBJ(observedAt)}</div>
+        ${evidence.length ? `<div style="margin-top:6px"><strong>证据:</strong>${evidence.map(item => `<div style="margin-top:2px">${item}</div>`).join('')}</div>` : ''}
+      </div>`;
+    } else if (d.description || d.note || d.summary || (Array.isArray(d.evidence) && d.evidence.length)) {
       // 通用详情展开（适用于 new_feature, commit_change 等）
       detailHTML = `<div class="change-expand" style="display:none;margin-top:6px;padding:8px 10px;background:rgba(255,255,255,.03);border-radius:4px;font-size:12px;line-height:1.8">
+        ${d.summary ? `<div><strong>摘要:</strong> ${d.summary}</div>` : ''}
         ${d.description ? `<div>${d.description}</div>` : ''}
         ${d.note ? `<div style="color:var(--text-dim)">${d.note}</div>` : ''}
-        <div style="color:var(--text-dim);margin-top:4px">记录时间: ${toBJ(c.timestamp)}</div>
+        ${Array.isArray(d.evidence) && d.evidence.length ? `<div style="margin-top:6px"><strong>证据:</strong>${d.evidence.map(item => `<div style="margin-top:2px">${item}</div>`).join('')}</div>` : ''}
+        ${d.source_time ? `<div style="color:var(--text-dim);margin-top:4px">官方时间: ${formatAnyTime(d.source_time)}</div>` : ''}
+        <div style="color:var(--text-dim);margin-top:4px">本地发现: ${toBJ(observedAt)}</div>
       </div>`;
     }
 
@@ -941,6 +1198,15 @@ function renderChanges(changes) {
       </div>
     </div>`;
   }).join('');
+}
+
+function matchesChangeFilter(changeType, filterType) {
+  const aliases = {
+    status: ['status_change', 'new_incident'],
+    new_repo: ['new_repo', 'repo_push', 'new_release', 'stars_change'],
+  };
+  if (aliases[filterType]) return aliases[filterType].includes(changeType);
+  return changeType === filterType;
 }
 
 function filterChanges(type, btn) {
@@ -987,7 +1253,12 @@ function toggleEndpointDesc(id) {
 async function loadCdn() {
   try {
     const data = await fetchJSON('/api/cdn');
-    const resources = data.resources || [];
+    const rawResources = data.resources || [];
+    const latestByFile = new Map();
+    rawResources.forEach(item => {
+      if (!latestByFile.has(item.filename)) latestByFile.set(item.filename, item);
+    });
+    const resources = Array.from(latestByFile.values());
     document.getElementById('cdnCount').textContent = resources.length;
     const tbody = document.getElementById('cdnBody');
     tbody.innerHTML = resources.map(r => `<tr>
@@ -998,10 +1269,200 @@ async function loadCdn() {
   } catch(e) { console.error('CDN failed:', e); }
 }
 
+async function loadBundles() {
+  try {
+    const data = await fetchJSON('/api/bundles?limit=10');
+    const bundles = data.bundles || [];
+    document.getElementById('bundleCount').textContent = bundles.length;
+    const tbody = document.getElementById('bundleBody');
+    if (!bundles.length) {
+      tbody.innerHTML = '<tr><td colspan="4" style="color:var(--text-dim)">暂无 bundle 分析结果，点击「立即检查」生成</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = bundles.map(item => {
+      const i = item.insights || {};
+      const roleMap = {
+        vendor_runtime: '依赖/运行时层',
+        application_bundle: '业务能力层',
+        style_bundle: 'UI/样式层',
+      };
+      const signals = [];
+      if (i.api_endpoint_count != null) signals.push(`API ${i.api_endpoint_count}`);
+      if (i.feature_flag_count != null) signals.push(`Flags ${i.feature_flag_count}`);
+      if (i.locale_count != null) signals.push(`语言 ${i.locale_count}`);
+      if (i.vendor_terms && i.vendor_terms.length) signals.push(`依赖 ${i.vendor_terms.length}`);
+      if (i.class_count != null) signals.push(`类 ${i.class_count}`);
+      if (i.css_var_count != null) signals.push(`变量 ${i.css_var_count}`);
+
+      const sample = []
+        .concat((i.vendor_terms || []).slice(0, 4))
+        .concat((i.hidden_capabilities || []).slice(0, 2))
+        .concat((i.api_families || []).slice(0, 3))
+        .concat((i.api_endpoints_sample || []).slice(0, 3))
+        .concat((i.css_var_sample || []).slice(0, 3))
+        .slice(0, 6);
+
+      return `<tr>
+        <td style="font-family:monospace;font-size:12px">${item.filename}<div style="font-size:11px;color:var(--text-dim);margin-top:4px">${toBJ(item.timestamp)}</div></td>
+        <td style="font-size:12px">${roleMap[item.bundle_type] || item.bundle_type}</td>
+        <td style="font-size:12px;color:var(--text-dim)">${signals.join(' | ') || '---'}</td>
+        <td style="font-size:12px;color:var(--text-dim)">${sample.length ? sample.join(' | ') : '---'}</td>
+      </tr>`;
+    }).join('');
+  } catch(e) { console.error('Bundles failed:', e); }
+}
+
+async function loadDeepseekWeb() {
+  try {
+    const data = await fetchJSON('/api/deepseek_web');
+    const panel = document.getElementById('webSignalsPanel');
+    const publicSignals = data.public_signals || {};
+    const sourceSignals = data.source_signals || {};
+    const narrative = data.narrative || [];
+    const recent = data.recent_highlights || [];
+    const badgeCount =
+      (publicSignals.models || []).length +
+      (sourceSignals.hidden_capabilities || []).length;
+    document.getElementById('webSignalCount').textContent = badgeCount;
+
+    const makeChips = (values, emptyText='---') => {
+      if (!values || !values.length) return `<div class="signal-note">${emptyText}</div>`;
+      return `<div class="signal-list">${values.map(v => `<span class="signal-chip">${v}</span>`).join('')}</div>`;
+    };
+
+    panel.innerHTML = `
+      <div class="signal-box">
+        <h3>公开面</h3>
+        <div class="signal-note" style="margin-bottom:8px">
+          当前 commit: <strong>${data.commit?.commit_id || '---'}</strong>
+          ${data.commit?.commit_datetime ? ` | 源码时间 ${data.commit.commit_datetime}` : ''}
+        </div>
+        <div class="signal-note" style="margin-bottom:6px"><strong>首页/文档信号</strong></div>
+        ${makeChips((publicSignals.headline_lines || []).slice(0, 3), '暂无首页标题线索')}
+        <div class="signal-note" style="margin:10px 0 6px"><strong>公开型号/能力</strong></div>
+        ${makeChips([]
+          .concat((publicSignals.models || []).slice(0, 8))
+          .concat((publicSignals.coding_signals || []).slice(0, 4))
+          .slice(0, 10), '暂无公开型号信号')}
+        <div class="signal-note" style="margin:10px 0 6px"><strong>公开定价线索</strong></div>
+        ${makeChips([]
+          .concat((publicSignals.prices || []).slice(0, 6))
+          .concat((publicSignals.pricing_lines || []).slice(0, 2))
+          .slice(0, 8), '暂无公开定价线索')}
+      </div>
+      <div class="signal-box">
+        <h3>源码隐藏面</h3>
+        <div class="signal-note" style="margin-bottom:6px"><strong>隐藏能力判断</strong></div>
+        ${makeChips((sourceSignals.hidden_capabilities || []).slice(0, 8), '暂无隐藏能力判断')}
+        <div class="signal-note" style="margin:10px 0 6px"><strong>路由 / API 家族</strong></div>
+        ${makeChips([]
+          .concat((sourceSignals.route_patterns || []).slice(0, 5))
+          .concat((sourceSignals.api_families || []).slice(0, 6))
+          .slice(0, 10), '暂无路由/API 信号')}
+        <div class="signal-note" style="margin:10px 0 6px"><strong>重点线索</strong></div>
+        ${makeChips([]
+          .concat((sourceSignals.coder_signals || []).slice(0, 2))
+          .concat((sourceSignals.vision_signals || []).slice(0, 2))
+          .concat((sourceSignals.agent_signals || []).slice(0, 2))
+          .slice(0, 6), '暂无 coder/vision/agent 线索')}
+      </div>
+      <div class="signal-box" style="grid-column:1/-1">
+        <h3>最近判断</h3>
+        ${narrative.length ? `<div class="signal-note">${narrative.map(v => `<div style="margin-bottom:4px">${v}</div>`).join('')}</div>` : '<div class="signal-note">暂无摘要</div>'}
+        <div class="signal-note" style="margin-top:10px"><strong>最近网页相关高信号</strong></div>
+        ${recent.length ? `<div class="signal-note">${recent.map(v => `<div style="margin-top:4px">${v.summary} <span style="color:var(--text-dim)">(${formatAnyTime(v.event_time)})</span></div>`).join('')}</div>` : '<div class="signal-note">最近暂无网页相关高信号</div>'}
+      </div>
+    `;
+  } catch(e) { console.error('DeepSeek web summary failed:', e); }
+}
+
+async function loadHighlights() {
+  try {
+    const data = await fetchJSON('/api/highlights?days=7&limit=12');
+    const highlights = data.highlights || [];
+    document.getElementById('highlightCount').textContent = highlights.length;
+    const list = document.getElementById('highlightsList');
+    if (!highlights.length) {
+      list.innerHTML = '<div class="empty-state">最近 7 天暂无高信号更新</div>';
+      return;
+    }
+
+    list.innerHTML = highlights.map(item => {
+      const d = item.change_data || {};
+      const labelMap = {
+        commit_change: '前端部署',
+        model_configs_change: '模型配置',
+        feature_flags_change: 'Flags',
+        api_endpoints_change: 'API',
+        legal_doc_update: '法律文档',
+        surface_change: '官网/文档',
+        bundle_insights_change: 'Bundle',
+        new_repo: 'GitHub',
+        repo_push: 'GitHub',
+        new_release: 'GitHub Release',
+        new_incident: 'Status',
+        status_change: 'Status',
+        resource_change: '资源变化',
+      };
+      const eventTime = item.event_time ? toBJ(item.event_time) : '---';
+      const observedAt = item.observed_at ? toBJ(item.observed_at) : '---';
+      const evidence = Array.isArray(d.evidence) && d.evidence.length ? d.evidence[0] : '';
+      return `<div class="change-item">
+        <div class="change-icon resource">${labelMap[item.change_type] || '更新'}</div>
+        <div class="change-detail">
+          <div class="title">${item.summary || item.change_type}</div>
+          <div class="meta">官方/事件时间 ${eventTime} | 本地发现 ${observedAt}</div>
+          ${evidence ? `<div class="diff">${evidence}</div>` : ''}
+        </div>
+      </div>`;
+    }).join('');
+  } catch(e) { console.error('Highlights failed:', e); }
+}
+
+async function loadCompetitors() {
+  try {
+    const data = await fetchJSON('/api/competitors?limit=20');
+    const items = data.competitors || [];
+    document.getElementById('competitorCount').textContent = items.length;
+    const tbody = document.getElementById('competitorBody');
+    if (!items.length) {
+      tbody.innerHTML = '<tr><td colspan="4" style="color:var(--text-dim)">暂无竞品侦察结果</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = items.map(item => {
+      const s = item.signals || {};
+      const models = (s.models || []).slice(0, 8);
+      const biz = []
+        .concat((s.commercial_actions || []).slice(0, 3))
+        .concat((s.offerings || []).slice(0, 4))
+        .concat((s.prices || []).slice(0, 4))
+        .concat((s.pricing_paths || []).slice(0, 2))
+        .slice(0, 6);
+      const versions = []
+        .concat((s.resource_versions || []).slice(0, 3))
+        .concat((s.dates || []).slice(0, 3))
+        .slice(0, 6);
+      return `<tr>
+        <td><a href="${item.final_url || item.url}" target="_blank" style="color:var(--accent);text-decoration:none">${item.name}</a></td>
+        <td style="font-size:12px;color:var(--text-dim)">${item.vendor}</td>
+        <td style="font-size:12px">${models.length ? models.join(' | ') : '---'}</td>
+        <td style="font-size:12px;color:var(--text-dim)">${biz.length ? biz.join(' | ') : (versions.length ? versions.join(' | ') : '---')}</td>
+      </tr>`;
+    }).join('');
+  } catch(e) { console.error('Competitors failed:', e); }
+}
+
 async function loadLegal() {
   try {
     const data = await fetchJSON('/api/legal');
-    const docs = data.docs || [];
+    const rawDocs = data.docs || [];
+    const latestByName = new Map();
+    rawDocs.forEach(item => {
+      if (!latestByName.has(item.doc_name)) latestByName.set(item.doc_name, item);
+    });
+    const docs = Array.from(latestByName.values());
     const tbody = document.getElementById('legalBody');
     tbody.innerHTML = docs.map(d => `<tr>
       <td>${d.doc_name}</td>
@@ -1009,6 +1470,40 @@ async function loadLegal() {
       <td style="font-size:12px">${toBJ(d.timestamp)}</td>
     </tr>`).join('');
   } catch(e) { console.error('Legal failed:', e); }
+}
+
+async function loadSurfaces() {
+  try {
+    const data = await fetchJSON('/api/surfaces?limit=20');
+    const surfaces = data.surfaces || [];
+    document.getElementById('surfaceCount').textContent = surfaces.length;
+    const tbody = document.getElementById('surfaceBody');
+    if (!surfaces.length) {
+      tbody.innerHTML = '<tr><td colspan="4" style="color:var(--text-dim)">暂无页面快照，点击「立即检查」开始侦察</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = surfaces.map(item => {
+      const signals = item.signals || {};
+      const counts = [];
+      if (signals.scripts) counts.push(`脚本 ${signals.scripts.length}`);
+      if (signals.styles) counts.push(`样式 ${signals.styles.length}`);
+      if (signals.anchors) counts.push(`链接 ${signals.anchors.length}`);
+      if (signals.urls) counts.push(`URL ${signals.urls.length}`);
+      const preview = Array.isArray(signals.text_preview) && signals.text_preview.length
+        ? `<div style="font-size:11px;color:var(--text-dim);margin-top:4px">${signals.text_preview[0]}</div>`
+        : '';
+      return `<tr>
+        <td>
+          <a href="${item.final_url || item.url}" target="_blank" style="color:var(--accent);text-decoration:none">${item.name}</a>
+          ${preview}
+        </td>
+        <td style="font-size:12px;color:var(--text-dim)">${item.category}</td>
+        <td style="font-size:12px">${item.last_modified ? gmtToBJ(item.last_modified) : '---'}</td>
+        <td style="font-size:12px;color:var(--text-dim)">${counts.join(' | ') || '---'}</td>
+      </tr>`;
+    }).join('');
+  } catch(e) { console.error('Surfaces failed:', e); }
 }
 
 async function loadGithub() {
@@ -1227,7 +1722,12 @@ async function loadAll() {
     loadChanges(),
     loadEndpoints(),
     loadCdn(),
+    loadDeepseekWeb(),
+    loadBundles(),
+    loadHighlights(),
+    loadCompetitors(),
     loadLegal(),
+    loadSurfaces(),
     loadGithub(),
     loadStatusPage(),
   ]);

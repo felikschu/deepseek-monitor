@@ -146,6 +146,9 @@ class GitHubMonitor:
                     "description": repo.get("description", ""),
                     "stars": repo["stars"],
                     "created_at": repo["created_at"],
+                    "source_time": repo["created_at"],
+                    "source_time_type": "repo_created_at",
+                    "observed_at": datetime.utcnow().isoformat(),
                     "detected_at": datetime.utcnow().isoformat(),
                 }
                 self.results["changes"].append(change)
@@ -177,6 +180,10 @@ class GitHubMonitor:
                         "repo_url": repo["html_url"],
                         "old_pushed": old["pushed_at"],
                         "new_pushed": repo["pushed_at"],
+                        "summary": "仓库级 pushed_at 发生变化，表示仓库近期有活动，不保证一定是默认分支新增公开 commit",
+                        "source_time": repo["pushed_at"],
+                        "source_time_type": "github_repo_pushed_at",
+                        "observed_at": datetime.utcnow().isoformat(),
                         "detected_at": datetime.utcnow().isoformat(),
                     }
                     self.results["changes"].append(change)
@@ -193,6 +200,7 @@ class GitHubMonitor:
                     "old_stars": old_stars,
                     "new_stars": new_stars,
                     "diff": new_stars - old_stars,
+                    "observed_at": datetime.utcnow().isoformat(),
                     "detected_at": datetime.utcnow().isoformat(),
                 }
                 self.results["changes"].append(change)
@@ -233,6 +241,9 @@ class GitHubMonitor:
                             "url": rel.get("html_url", ""),
                             "published_at": published,
                             "prerelease": rel.get("prerelease", False),
+                            "source_time": published,
+                            "source_time_type": "github_release_published_at",
+                            "observed_at": datetime.utcnow().isoformat(),
                             "detected_at": datetime.utcnow().isoformat(),
                         }
                         self.results["changes"].append(change)

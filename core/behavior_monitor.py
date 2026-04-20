@@ -44,6 +44,7 @@ class BehaviorMonitor:
             "changes": [],
             "test_results": []
         }
+        self.input_selector = None
 
     async def check(self) -> Dict[str, Any]:
         """执行行为检查
@@ -60,6 +61,13 @@ class BehaviorMonitor:
 
             # 访问主页
             await self._navigate_to_main_page()
+
+            if await self._detect_auth_gate():
+                note = "当前网页未登录态直接进入登录页，行为测试需要有效登录态。"
+                logger.warning(note)
+                self.results["auth_required"] = True
+                self.results["note"] = note
+                return self.results
 
             # 执行测试用例
             test_cases = self.behavior_config.get("test_cases", [])
@@ -130,6 +138,16 @@ class BehaviorMonitor:
 
         logger.info("页面加载完成")
 
+    async def _detect_auth_gate(self) -> bool:
+        """检测当前页面是否处于登录门槛。"""
+        body_text = await self.page.locator("body").inner_text()
+        markers = [
+            "Send code",
+            "Log in",
+            "Scan with Wechat to login",
+        ]
+        return all(marker in body_text for marker in markers)
+
     async def _execute_test_case(self, test_case: Dict) -> Dict:
         """执行单个测试用例
 
@@ -148,7 +166,7 @@ class BehaviorMonitor:
         start_time = datetime.now()
 
         # 输入问题
-        await self.page.type("textarea[placeholder*='输入' i], textarea[placeholder*='Send' i], .chat-input", prompt, delay=50)
+        await self._type_prompt(prompt)
 
         # 发送（模拟 Enter 键或点击发送按钮）
         await self._send_message()
@@ -176,12 +194,53 @@ class BehaviorMonitor:
     async def _wait_for_input_ready(self):
         """等待输入框就绪"""
         try:
-            # 等待输入框出现
-            await self.page.wait_for_selector("textarea", timeout=10000)
+            selectors = [
+                "textarea:visible",
+                "[contenteditable='true']:visible",
+                "[role='textbox']:visible",
+                ".chat-input:visible",
+            ]
+            for selector in selectors:
+                locator = self.page.locator(selector).first
+                if await locator.count():
+                    try:
+                        await locator.wait_for(state="visible", timeout=3000)
+                        self.input_selector = selector
+                        await asyncio.sleep(1)
+                        return
+                    except Exception:
+                        continue
+
+            locator = self.page.locator(
+                "textarea, [contenteditable='true'], [role='textbox'], .chat-input"
+            ).first
+            await locator.wait_for(state="visible", timeout=10000)
+            self.input_selector = "textarea, [contenteditable='true'], [role='textbox'], .chat-input"
             await asyncio.sleep(1)
         except Exception as e:
             logger.error(f"等待输入框失败: {e}")
             raise
+
+    async def _type_prompt(self, prompt: str):
+        """向当前输入控件输入 prompt。"""
+        selector = self.input_selector or "textarea, [contenteditable='true'], [role='textbox'], .chat-input"
+        locator = self.page.locator(selector).first
+        await locator.click()
+
+        tag_name = await locator.evaluate("el => (el.tagName || '').toLowerCase()")
+        is_contenteditable = await locator.evaluate(
+            "el => el.getAttribute('contenteditable') === 'true'"
+        )
+
+        if tag_name in ("textarea", "input"):
+            await locator.fill(prompt)
+            return
+
+        if is_contenteditable:
+            await self.page.keyboard.type(prompt, delay=50)
+            return
+
+        await self.page.type(selector, prompt, delay=50)
 
     async def _send_message(self):
         """发送消息"""

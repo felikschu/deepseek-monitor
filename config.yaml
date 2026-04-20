@@ -22,6 +22,9 @@ targets:
   cdn_base: "https://fe-static.deepseek.com/chat/static"
   legal_docs_base: "https://cdn.deepseek.com/policies/en-US"
 
+  # 可选认证配置（用于追踪需要登录态的接口，如 /api/v0/client/settings）
+  auth_token: ""
+
   # 需要监控的端点
   endpoints:
     - url: "/"
@@ -200,3 +203,100 @@ tracking:
   cdn_tracking:
     enabled: true
     check_method: "HEAD"
+
+# 官方站点与文档页监控
+official_surfaces:
+  enabled: true
+  pages:
+    - name: "官网首页"
+      url: "https://www.deepseek.com/"
+      category: "site"
+      parser: "html"
+    - name: "官网英文页"
+      url: "https://www.deepseek.com/en/"
+      category: "site"
+      parser: "html"
+    - name: "API Docs 首页"
+      url: "https://api-docs.deepseek.com/"
+      category: "docs"
+      parser: "html"
+    - name: "API Pricing 文档"
+      url: "https://api-docs.deepseek.com/quick_start/pricing"
+      category: "docs"
+      parser: "html"
+    - name: "API Pricing 明细（CNY）"
+      url: "https://api-docs.deepseek.com/quick_start/pricing-details-cny"
+      category: "docs"
+      parser: "html"
+    - name: "API Pricing 明细（USD）"
+      url: "https://api-docs.deepseek.com/quick_start/pricing-details-usd"
+      category: "docs"
+      parser: "html"
+    - name: "API Rate Limit 文档"
+      url: "https://api-docs.deepseek.com/quick_start/rate_limit"
+      category: "docs"
+      parser: "html"
+    - name: "API Docs Sitemap"
+      url: "https://api-docs.deepseek.com/sitemap.xml"
+      category: "docs"
+      parser: "sitemap"
+
+# 竞品侦察：重点抽取模型型号和官网版本信号
+competitor_surfaces:
+  enabled: true
+  pages:
+    - name: "智谱首页"
+      vendor: "zhipu"
+      url: "https://www.zhipuai.cn/"
+      category: "competitor_site"
+    - name: "智谱新闻页"
+      vendor: "zhipu"
+      url: "https://www.zhipuai.cn/zh/news"
+      category: "competitor_news"
+    - name: "智谱研究页"
+      vendor: "zhipu"
+      url: "https://www.zhipuai.cn/zh/research"
+      category: "competitor_research"
+    - name: "智谱 GLM-5-Turbo 研究页"
+      vendor: "zhipu"
+      url: "https://www.zhipuai.cn/en/research/155"
+      category: "competitor_research"
+    - name: "智谱 GLM-5V-Turbo 研究页"
+      vendor: "zhipu"
+      url: "https://www.zhipuai.cn/zh/research/156"
+      category: "competitor_research"
+    - name: "智谱开放平台"
+      vendor: "zhipu"
+      url: "https://open.bigmodel.cn/"
+      category: "competitor_platform"
+      script_probe_limit: 6
+    - name: "MiniMax 首页"
+      vendor: "minimax"
+      url: "https://www.minimax.io/"
+      category: "competitor_site"
+      script_probe_limit: 3
+    - name: "MiniMax 新闻页"
+      vendor: "minimax"
+      url: "https://www.minimax.io/news"
+      category: "competitor_news"
+      script_probe_limit: 3
+    - name: "MiniMax Pricing Overview"
+      vendor: "minimax"
+      url: "https://platform.minimax.io/docs/pricing/overview"
+      category: "competitor_pricing"
+      script_probe_limit: 2
+    - name: "MiniMax Token Plan"
+      vendor: "minimax"
+      url: "https://platform.minimax.io/docs/guides/pricing-token-plan"
+      category: "competitor_pricing"
+      script_probe_limit: 2
+    - name: "MiniMax Token Plan Referral"
+      vendor: "minimax"
+      url: "https://platform.minimax.io/docs/token-plan/promotion"
+      category: "competitor_pricing"
+      script_probe_limit: 1
+    - name: "MiniMax MCP News"
+      vendor: "minimax"
+      url: "https://www.minimax.io/news/minimax-mcp"
+      category: "competitor_news"
+      script_probe_limit: 2

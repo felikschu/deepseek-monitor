@@ -6,6 +6,72 @@
 
 ## 2026年4月
 
+### 4月20日 — 新增“DeepSeek 网页动向”语义摘要板块
+
+**类型**: 监控系统升级
+
+**详情**:
+- 新增 `utils/deepseek_bundle_semantics.py`，把 `coder / vision / agent / api / pricing` 从关键词命中提升为结构化语义
+- 前端 `Bundle 深挖` 现在会展示隐藏能力、路由模式、API 家族，不再只显示 API 数量和依赖数量
+- Dashboard 新增 “DeepSeek 网页动向” 板块，分开展示：
+  - 官网/文档公开表达了什么
+  - chat bundle 里已经埋了什么隐藏能力
+- 官方页面监控的 diff 粒度升级，新增：
+  - `route_patterns`
+  - `api_families`
+  - `hidden_capabilities`
+  - `coder_signals`
+  - `vision_signals`
+  - `agent_signals`
+- 修复 bundle 语义分析因“新字段上线但内容为空”导致的伪变化，避免 vendor/runtime 噪音干扰高信号摘要
+- 新增测试覆盖网页摘要逻辑和 DeepSeek bundle 语义抽取
+- 实测当前 DeepSeek chat 公开前端仍为：
+  - `main.e0f8beaa34.js`
+  - `commit-id: 4b9671fa`
+  - `commit_datetime: 2026/04/16 13:01:46`
+
+### 4月19日 — 侦察方法升级为“页面 + 同源脚本”双层探针
+
+**类型**: 监控系统升级
+
+**详情**:
+- 新增 `OfficialMonitor` / `CompetitorMonitor` 的同源脚本探针，不再只看 HTML
+- 新增竞品商业化信号抽取：价格、套餐、Token Plan、MiniMax Agent、龙虾套餐、Code Interpreter 等
+- 新增可疑链接发现与商业动作摘要：`promotion` / `token-plan` / `mcp` / `agent` / `research/<id>`
+- 新增智谱 `GLM-5V-Turbo` 研究页、MiniMax `Referral Program` 与 `MCP News` 监控面
+- 修复脚本探针优先级，优先抓 `app/main/page`，避免 `runtime/vendor` 抢占探测名额
+- 竞品变化时间支持优先回填页面发布时间信号，不再只依赖 HTTP `Last-Modified`
+- 竞品侦察增加单页超时保护，避免单个慢页面卡住整轮报告
+- 新增 `scripts/recon_competitors.py`，可直接生成智谱 / MiniMax 侦察报告
+- 修复 `model_configs_change` 历史误报在高信号摘要里继续展示的问题
+- 前后端统一：CLI 模式和 Dashboard 的 `/api/check` 都会跑竞品侦察
+- 新增自动化测试，覆盖提取器和高信号过滤逻辑
+
+### 4月7日 — 三模型模式代码全面上线（当日三版热更）
+
+**类型**: 重大代码部署
+
+**证据来源**: 生产 JS 内嵌元数据、HTML `<meta name="commit-id">`、JS 源码分析、CDN HEAD 请求
+
+**详情**:
+- 4月7日当天 DeepSeek 连续进行了 **三次前端热部署**：
+
+| 时间 | commit-id | JS 文件 | 状态 | 说明 |
+|------|-----------|---------|------|------|
+| 12:58 | `6f08af6b` | `main.a7e3d12518.js` | 已下线 | 中间版本，存在约 4 小时 |
+| 17:13 | `086dedc0` | `main.b8c3389fe2.js` | 已下线 | 中间版本，存在约 1 小时 |
+| **18:00** | **`e11cf433`** | **`main.c578e6e518.js`** | **当前线上版本** | 新增多模型切换判断条件 |
+
+- **关键发现**：`default` / `expert` / `vision` 三种模型模式的完整 UI 逻辑已**全部编译进生产包**
+  - `expert` 对应 R1/思考模式（不支持文件上传）
+  - `vision` 对应多模态/视觉模式（支持图片上传）
+  - `default` 对应 V3.2 非思考模式
+- 模型切换器是否渲染取决于服务端 `/api/v0/client/settings` 返回的 `model_configs` 数量，说明前端已就绪，服务端正在**灰度放量**
+- CDN `Last-Modified`（最终版）: `Tue, 07 Apr 2026 09:26:01 GMT`
+- 注意：monitor 在 09:27-09:33 之间因多次触发检查产生过重复记录，已通过在 `save_cdn_resource` 和 `save_resource_hash` 中加入去重逻辑修复
+
+---
+
 ### 4月3日 — CDN 新部署 + 短暂异常
 
 **类型**: 部署 + 故障
@@ -164,7 +230,8 @@
   - 快速模式 / Instant Mode
   - 专家模式 / Expert Mode（DeepThink）
   - 多模态模式 / Vision Mode
-- 当前生产版仅使用两开关模式（DeepThink + Search），无三模式切换
+- ~~当前生产版仅使用两开关模式（DeepThink + Search），无三模式切换~~
+- **更新（2026-04-07）**: `main.a7e3d12518.js` 已将三模式切换的完整代码全面编译进生产包，服务端通过 `model_configs` 配置进行灰度放量
 
 ---
 
@@ -174,8 +241,9 @@
 
 | 字段 | 值 |
 |------|------|
-| commit-id | `1fcf6559` |
-| commit-datetime | `2026/04/01 21:01:36` |
+| commit-id | `e11cf433` |
+| commit-datetime | `2026/04/07 18:00:18` |
+| commit 简报 | 优化上传按钮提示文案逻辑，新增多模型可切换状态的判断条件 |
 | 前端包 | `@deepseek/chat` v1.5.8 |
 | API 版本 | v1.7.1 |
 

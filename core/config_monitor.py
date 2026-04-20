@@ -12,6 +12,7 @@ import json
 from datetime import datetime
 from typing import Dict, List, Any
 from pathlib import Path
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from playwright.async_api import async_playwright, Browser
 from loguru import logger
@@ -21,6 +22,11 @@ from utils.diff_utils import deep_diff
 
 class ConfigMonitor:
     """模型配置监控器"""
+
+    VOLATILE_HEADER_NAMES = {
+        "date",
+        "x-ds-trace-id",
+    }
 
     def __init__(self, config: Dict, storage):
         """初始化配置监控器
@@ -43,6 +49,35 @@ class ConfigMonitor:
             "changes": [],
             "config": {}
         }
+
+    def _normalize_config_for_diff(self, config: Dict) -> Dict:
+        """清洗会导致伪变化的随机字段。"""
+        normalized = json.loads(json.dumps(config or {}, ensure_ascii=False))
+
+        def normalize_url(url: str) -> str:
+            parts = urlsplit(url)
+            query = [(key, value) for key, value in parse_qsl(parts.query, keep_blank_values=True) if key.lower() != "did"]
+            normalized_query = urlencode(query)
+            return urlunsplit((parts.scheme, parts.netloc, parts.path, normalized_query, parts.fragment))
+
+        api_config = normalized.get("api_config")
+        if isinstance(api_config, dict):
+            normalized_api_config = {}
+            for url, value in api_config.items():
+                normalized_value = value
+                if isinstance(value, dict):
+                    normalized_value = json.loads(json.dumps(value, ensure_ascii=False))
+                    headers = normalized_value.get("headers")
+                    if isinstance(headers, dict):
+                        normalized_value["headers"] = {
+                            key: header_value
+                            for key, header_value in headers.items()
+                            if key.lower() not in self.VOLATILE_HEADER_NAMES
+                        }
+                normalized_api_config[normalize_url(url)] = normalized_value
+            normalized["api_config"] = normalized_api_config
+
+        return normalized
 
     async def check(self) -> Dict[str, Any]:
         """执行配置检查
@@ -118,6 +153,16 @@ class ConfigMonitor:
         await asyncio.sleep(2)
 
         logger.info("页面加载完成")
+
+    async def _detect_auth_gate(self) -> bool:
+        """检测当前页面是否处于登录门槛。"""
+        body_text = await self.page.locator("body").inner_text()
+        markers = [
+            "Send code",
+            "Log in",
+            "Scan with Wechat to login",
+        ]
+        return all(marker in body_text for marker in markers)
 
     async def _extract_model_config(self) -> Dict:
         """提取模型配置
@@ -195,10 +240,16 @@ class ConfigMonitor:
 
         api_responses = {}
 
+        def normalize_url(url: str) -> str:
+            parts = urlsplit(url)
+            query = [(key, value) for key, value in parse_qsl(parts.query, keep_blank_values=True) if key.lower() != "did"]
+            normalized_query = urlencode(query)
+            return urlunsplit((parts.scheme, parts.netloc, parts.path, normalized_query, parts.fragment))
+
         def log_response(response):
             """记录 API 响应"""
             request = response.request
-            url = response.url
+            url = normalize_url(response.url)
 
             # 只记录配置相关的请求
             if any(keyword in url.lower() for keyword in ["config", "model", "feature", "flag"]):
@@ -241,10 +292,12 @@ class ConfigMonitor:
 
         # 获取历史配置
         last_config = await self.storage.get_last_model_config()
+        current_normalized = self._normalize_config_for_diff(current_config)
 
         if last_config:
+            last_normalized = self._normalize_config_for_diff(last_config["config"])
             # 计算差异
-            diff = deep_diff(last_config["config"], current_config)
+            diff = deep_diff(last_normalized, current_normalized)
 
             if diff:
                 change = {
@@ -264,7 +317,7 @@ class ConfigMonitor:
             logger.info("首次保存配置")
 
         # 保存当前配置
-        await self.storage.save_model_config(current_config)
+        await self.storage.save_model_config(current_normalized)
 
     async def _detect_api_endpoints(self):
         """检测 API 端点变化"""
@@ -304,6 +357,22 @@ class ConfigMonitor:
         if api_endpoints:
             logger.info(f"发现 {len(api_endpoints)} 个 API 端点")
             self.results["api_endpoints"] = list(api_endpoints)
+
+            if await self._detect_auth_gate():
+                note = "当前网页未登录态处于登录门槛，API 端点观测面不足，跳过端点删除判断。"
+                logger.warning(note)
+                self.results["api_endpoints_note"] = note
+                return
+
+            min_confident_endpoints = 5
+            if len(api_endpoints) < min_confident_endpoints:
+                note = (
+                    f"本轮仅捕获 {len(api_endpoints)} 个 API 端点，低于可信阈值 "
+                    f"{min_confident_endpoints}，跳过端点变化判断。"
+                )
+                logger.warning(note)
+                self.results["api_endpoints_note"] = note
+                return
 
             # 检查端点变化
             last_endpoints = await self.storage.get_last_api_endpoints()

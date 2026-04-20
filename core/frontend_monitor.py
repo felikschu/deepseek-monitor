@@ -11,8 +11,10 @@
 """
 
 import asyncio
+import json
 import re
 import hashlib
+from difflib import SequenceMatcher
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Any, Optional
@@ -24,6 +26,12 @@ from loguru import logger
 
 from utils.hash_utils import calculate_file_hash
 from utils.diff_utils import extract_code_patterns, compare_patterns
+from utils.bundle_inspector import (
+    analyze_js_bundle,
+    analyze_css_bundle,
+    summarize_bundle_diff,
+    insights_equal,
+)
 
 
 class FrontendMonitor:
@@ -42,6 +50,7 @@ class FrontendMonitor:
         self.frontend_config = config.get("frontend", {})
 
         self.session = None
+        self._resource_hash_state = {}
         self.results = {
             "timestamp": None,
             "changes": [],
@@ -51,6 +60,8 @@ class FrontendMonitor:
             "feature_flags": {},
             "api_endpoints": [],
             "legal_docs": {},
+            "model_configs": {},
+            "bundle_insights": {},
         }
 
     async def _get_session(self) -> aiohttp.ClientSession:
@@ -108,11 +119,57 @@ class FrontendMonitor:
             # 10. 检查法律文档更新
             await self._check_legal_docs()
 
+            # 11. 检查 model_configs（需 auth_token，否则记录空响应）
+            await self._check_model_configs()
+
+            # 12. 深度拆解关键 bundles
+            await self._inspect_bundles(resources)
+
         except Exception as e:
             logger.error(f"前端资源检查失败: {e}", exc_info=True)
             self.results["error"] = str(e)
 
         return self.results
+
+    def _stamp_change(
+        self,
+        change: Dict[str, Any],
+        source_time: str = "",
+        source_time_type: str = "unknown",
+    ) -> Dict[str, Any]:
+        observed_at = datetime.now().isoformat()
+        change["observed_at"] = observed_at
+        change["detected_at"] = observed_at
+        if source_time:
+            change["source_time"] = source_time
+            change["source_time_type"] = source_time_type
+        return change
+
+    def _normalize_text(self, text: str) -> str:
+        lines = []
+        for line in text.splitlines():
+            compact = re.sub(r"\s+", " ", line).strip()
+            if compact:
+                lines.append(compact)
+        return "\n".join(lines)
+
+    def _summarize_text_diff(self, old_text: str, new_text: str) -> List[str]:
+        old_lines = [line for line in old_text.splitlines() if line.strip()]
+        new_lines = [line for line in new_text.splitlines() if line.strip()]
+        matcher = SequenceMatcher(None, old_lines, new_lines)
+        evidence = []
+        for opcode, i1, i2, j1, j2 in matcher.get_opcodes():
+            if opcode == "equal":
+                continue
+            added = [line for line in new_lines[j1:j2] if len(line) >= 10][:2]
+            removed = [line for line in old_lines[i1:i2] if len(line) >= 10][:2]
+            if added:
+                evidence.append("正文新增: " + " | ".join(added))
+            if removed:
+                evidence.append("正文移除: " + " | ".join(removed))
+            if len(evidence) >= 4:
+                break
+        return evidence
 
     async def _fetch_main_page(self) -> str:
         """获取主页 HTML 内容
@@ -156,13 +213,12 @@ class FrontendMonitor:
         is_new = await self.storage.save_commit(commit_id)
 
         if last_commit and last_commit["commit_id"] != commit_id:
-            change = {
+            change = self._stamp_change({
                 "type": "commit_change",
                 "old_commit": last_commit["commit_id"],
                 "new_commit": commit_id,
                 "last_seen": last_commit.get("timestamp"),
-                "detected_at": datetime.now().isoformat(),
-            }
+            })
             self.results["changes"].append(change)
             logger.warning(f"检测到 commit-id 变化: {last_commit['commit_id']} -> {commit_id}")
         elif is_new:
@@ -230,7 +286,11 @@ class FrontendMonitor:
 
                     if last_hash:
                         if file_hash != last_hash["hash"]:
-                            change = {
+                            self._resource_hash_state[filename] = {
+                                "current_hash": file_hash,
+                                "hash_changed": True,
+                            }
+                            change = self._stamp_change({
                                 "type": "resource_change",
                                 "resource_type": resource_type,
                                 "filename": filename,
@@ -238,24 +298,30 @@ class FrontendMonitor:
                                 "old_hash": last_hash["hash"],
                                 "new_hash": file_hash,
                                 "last_seen": last_hash["timestamp"],
-                                "detected_at": datetime.now().isoformat()
-                            }
+                            })
                             self.results["changes"].append(change)
                             logger.warning(f"检测到 {resource_type.upper()} 文件变化: {filename}")
                             logger.info(f"  旧 hash: {last_hash['hash'][:16]}...")
                             logger.info(f"  新 hash: {file_hash[:16]}...")
                         else:
+                            self._resource_hash_state[filename] = {
+                                "current_hash": file_hash,
+                                "hash_changed": False,
+                            }
                             logger.debug(f"{filename} 未变化")
                     else:
+                        self._resource_hash_state[filename] = {
+                            "current_hash": file_hash,
+                            "hash_changed": True,
+                        }
                         logger.info(f"首次发现文件: {filename}")
-                        change = {
+                        change = self._stamp_change({
                             "type": "new_resource",
                             "resource_type": resource_type,
                             "filename": filename,
                             "url": url,
                             "hash": file_hash,
-                            "detected_at": datetime.now().isoformat()
-                        }
+                        })
                         self.results["changes"].append(change)
 
                     await self.storage.save_resource_hash(filename, file_hash, url)
@@ -302,12 +368,19 @@ class FrontendMonitor:
                 response.raise_for_status()
                 js_content = await response.text()
 
+            commit_id = self.results.get("commit", {}).get("id")
+
             # 提取 commit-datetime
             dt_match = re.search(r'commit_datetime:"([^"]*)"', js_content)
             if dt_match:
                 commit_dt = dt_match.group(1)
                 self.results["commit"]["datetime"] = commit_dt
                 logger.info(f"  commit-datetime: {commit_dt}")
+                for change in reversed(self.results["changes"]):
+                    if change.get("type") == "commit_change" and change.get("new_commit") == commit_id:
+                        change["source_time"] = commit_dt
+                        change["source_time_type"] = "bundle_commit_datetime"
+                        break
 
             # 提取前端包版本
             ver_match = re.search(r'@deepseek/chat[^"]*"\s*:\s*"([^"]+)"', js_content)
@@ -318,7 +391,6 @@ class FrontendMonitor:
                 logger.info(f"  package: @deepseek/chat {ver_match.group(1)}")
 
             # 更新 commit 记录中的 datetime 和 package_version
-            commit_id = self.results.get("commit", {}).get("id")
             if commit_id:
                 await self.storage.save_commit(
                     commit_id,
@@ -336,12 +408,11 @@ class FrontendMonitor:
                 pattern_changes = compare_patterns(last_patterns["patterns"], extracted_patterns)
 
                 if pattern_changes:
-                    change = {
+                    change = self._stamp_change({
                         "type": "pattern_change",
                         "filename": filename,
                         "changes": pattern_changes,
-                        "detected_at": datetime.now().isoformat()
-                    }
+                    })
                     self.results["changes"].append(change)
                     logger.warning(f"检测到 {len(pattern_changes)} 个代码模式变化")
 
@@ -406,13 +477,12 @@ class FrontendMonitor:
                            if flags[k] != old_flags[k]}
 
                 if added or removed or changed:
-                    change = {
+                    change = self._stamp_change({
                         "type": "feature_flags_change",
                         "added": list(added),
                         "removed": list(removed),
                         "changed": {k: {"old": old_flags[k], "new": flags[k]} for k in changed},
-                        "detected_at": datetime.now().isoformat(),
-                    }
+                    })
                     self.results["changes"].append(change)
                     if added:
                         logger.warning(f"  新增 flags: {added}")
@@ -461,12 +531,11 @@ class FrontendMonitor:
                 removed = old_set - new_set
 
                 if added or removed:
-                    change = {
+                    change = self._stamp_change({
                         "type": "api_endpoints_change",
                         "added": list(added),
                         "removed": list(removed),
-                        "detected_at": datetime.now().isoformat(),
-                    }
+                    })
                     self.results["changes"].append(change)
                     if added:
                         logger.warning(f"  新增端点: {added}")
@@ -500,15 +569,31 @@ class FrontendMonitor:
                         continue
 
                     last_record = await self.storage.get_last_cdn_resource(filename)
+                    hash_changed = self._resource_hash_state.get(filename, {}).get("hash_changed", False)
 
                     if last_record and last_record["last_modified"] != last_modified:
-                        change = {
+                        # CDN 的 Last-Modified 会偶发抖动。只有在内容或其他签名也变时才认为是有效更新。
+                        etag_changed = (last_record.get("etag") or "") != (etag or "")
+                        size_changed = (last_record.get("content_length") or 0) != (int(content_length) if content_length else 0)
+                        if not any([hash_changed, etag_changed, size_changed]):
+                            logger.info(
+                                f"忽略 CDN Last-Modified 抖动: {filename} "
+                                f"{last_record['last_modified']} -> {last_modified}"
+                            )
+                            await self.storage.save_cdn_resource(
+                                filename, last_modified, etag,
+                                int(content_length) if content_length else None
+                            )
+                            continue
+                        change = self._stamp_change({
                             "type": "cdn_update",
                             "filename": filename,
                             "old_modified": last_record["last_modified"],
                             "new_modified": last_modified,
-                            "detected_at": datetime.now().isoformat(),
-                        }
+                            "etag_changed": etag_changed,
+                            "size_changed": size_changed,
+                            "content_changed": hash_changed,
+                        }, source_time=last_modified, source_time_type="http_last_modified")
                         self.results["changes"].append(change)
                         logger.warning(f"CDN 资源更新: {filename}")
                         logger.info(f"  旧: {last_record['last_modified']}")
@@ -537,33 +622,118 @@ class FrontendMonitor:
             url = doc["url"]
 
             try:
-                async with session.head(url) as response:
+                async with session.get(url) as response:
                     last_modified = response.headers.get("Last-Modified", "")
+                    etag = response.headers.get("ETag", "")
+                    content_type = response.headers.get("Content-Type", "")
+                    html = await response.text()
 
                 if not last_modified:
                     continue
 
                 last_record = await self.storage.get_last_legal_doc(name)
+                previous_snapshot = await self.storage.get_last_surface_snapshot(url)
+                current_text = self._normalize_text(BeautifulSoup(html, "html.parser").get_text("\n", strip=True))
+                current_snapshot = {
+                    "final_url": url,
+                    "title": name,
+                    "last_modified": last_modified,
+                    "etag": etag,
+                    "content_type": content_type,
+                    "status_code": 200,
+                    "html_hash": hashlib.md5(html.encode("utf-8")).hexdigest(),
+                    "text_hash": hashlib.md5(current_text.encode("utf-8")).hexdigest(),
+                    "normalized_text": current_text,
+                    "signals": {
+                        "text_preview": current_text.splitlines()[:20],
+                    },
+                }
 
                 if last_record and last_record["last_modified"] != last_modified:
-                    change = {
+                    evidence = []
+                    if previous_snapshot:
+                        evidence = self._summarize_text_diff(
+                            previous_snapshot.get("normalized_text", ""),
+                            current_snapshot["normalized_text"],
+                        )
+                    change = self._stamp_change({
                         "type": "legal_doc_update",
                         "doc_name": name,
                         "old_modified": last_record["last_modified"],
                         "new_modified": last_modified,
                         "url": url,
-                        "detected_at": datetime.now().isoformat(),
-                    }
+                        "summary": f"{name} 更新时间变化",
+                        "evidence": evidence,
+                    }, source_time=last_modified, source_time_type="http_last_modified")
                     self.results["changes"].append(change)
                     logger.warning(f"法律文档更新: {name}")
                     logger.info(f"  旧: {last_record['last_modified']}")
                     logger.info(f"  新: {last_modified}")
 
                 await self.storage.save_legal_doc(name, last_modified, url)
+                await self.storage.save_surface_snapshot(url, name, "legal_doc", current_snapshot)
                 self.results["legal_docs"][name] = last_modified
 
             except Exception as e:
                 logger.debug(f"检查法律文档 {name} 失败: {e}")
+
+    async def _check_model_configs(self):
+        """检查 /api/v0/client/settings 返回的 model_configs（灰度追踪）"""
+        base_url = self.targets.get("base_url")
+        auth_token = self.targets.get("auth_token", "")
+        url = f"{base_url}/api/v0/client/settings"
+        session = await self._get_session()
+
+        headers = {}
+        if auth_token:
+            headers["Authorization"] = f"Bearer {auth_token}"
+
+        try:
+            async with session.get(url, headers=headers) as response:
+                response.raise_for_status()
+                data = await response.json()
+
+            api_data = data.get("data")
+            model_count = 0
+            has_real_model_configs = False
+            if isinstance(api_data, dict):
+                model_count = len(api_data.get("model_configs", []))
+                has_real_model_configs = "model_configs" in api_data
+
+            self.results["model_configs"] = {
+                "has_data": api_data is not None,
+                "model_count": model_count,
+                "raw_data": api_data,
+                "raw_response": data,
+            }
+
+            # 与上次对比
+            last = await self.storage.get_last_model_config()
+            if last:
+                last_str = json.dumps(last["config"], ensure_ascii=False, sort_keys=True)
+                curr_str = json.dumps(api_data if api_data is not None else {}, ensure_ascii=False, sort_keys=True)
+                last_has_real = isinstance(last["config"], dict) and "model_configs" in last["config"]
+                if last_str != curr_str and (has_real_model_configs or last_has_real):
+                    change = self._stamp_change({
+                        "type": "model_configs_change",
+                        "old": last["config"],
+                        "new": api_data if api_data is not None else {},
+                    })
+                    self.results["changes"].append(change)
+                    logger.warning("检测到 model_configs 变化")
+                    logger.info(f"  旧: {last_str[:200]}...")
+                    logger.info(f"  新: {curr_str[:200]}...")
+                else:
+                    logger.debug("model_configs 未变化")
+            else:
+                logger.info("首次记录 model_configs")
+
+            # 仅保存真实 model_configs 数据，避免错误响应/空数据污染历史
+            if has_real_model_configs:
+                await self.storage.save_model_config(api_data)
+
+        except Exception as e:
+            logger.error(f"model_configs 检查失败: {e}")
 
     def _find_main_js_file(self, js_files: Dict[str, str]) -> Optional[tuple]:
         """找到 main JS 文件
@@ -592,12 +762,11 @@ class FrontendMonitor:
         # 检测三模型模式
         if any("三模型" in str(v) or "three_model" in str(v).lower() for v in patterns.values()):
             if not await self.storage.was_feature_detected("three_model_mode"):
-                change = {
+                change = self._stamp_change({
                     "type": "new_feature",
                     "feature_name": "三模型模式",
                     "description": "检测到可能支持三种模型选择的功能",
-                    "detected_at": datetime.now().isoformat()
-                }
+                })
                 self.results["changes"].append(change)
                 logger.info("检测到新功能: 三模型模式")
                 await self.storage.mark_feature_detected("three_model_mode")
@@ -605,12 +774,11 @@ class FrontendMonitor:
         # 检测文件上传功能
         file_feature = patterns.get("file_feature", {})
         if file_feature and not await self.storage.was_feature_detected("file_upload"):
-            change = {
+            change = self._stamp_change({
                 "type": "new_feature",
                 "feature_name": "文件上传",
                 "description": f"检测到文件上传配置: {file_feature}",
-                "detected_at": datetime.now().isoformat()
-            }
+            })
             self.results["changes"].append(change)
             logger.info("检测到新功能: 文件上传")
             await self.storage.mark_feature_detected("file_upload")
@@ -626,15 +794,70 @@ class FrontendMonitor:
         }
         for flag, desc in new_flag_features.items():
             if flag in flags and not await self.storage.was_feature_detected(f"flag_{flag}"):
-                change = {
+                change = self._stamp_change({
                     "type": "new_feature",
                     "feature_name": desc,
                     "description": f"Feature flag: {flag} = {flags[flag]}",
-                    "detected_at": datetime.now().isoformat(),
-                }
+                })
                 self.results["changes"].append(change)
                 logger.info(f"检测到新功能: {desc} ({flag})")
                 await self.storage.mark_feature_detected(f"flag_{flag}")
+
+    async def _inspect_bundles(self, resources: Dict):
+        """深度分析关键 bundles，提取 API/依赖/UI 语义信号。"""
+        logger.info("深度拆解关键 bundles...")
+
+        session = await self._get_session()
+        targets = []
+
+        main_js = self._find_main_js_file(resources["js"])
+        if main_js:
+            targets.append(("js", main_js[0], main_js[1]))
+
+        for filename, url in resources.get("js", {}).items():
+            if filename.startswith("default-vendors.") and filename.endswith(".js"):
+                targets.append(("js", filename, url))
+                break
+
+        for filename, url in resources.get("css", {}).items():
+            if filename.startswith("main.") and filename.endswith(".css"):
+                targets.append(("css", filename, url))
+                break
+
+        for bundle_type, filename, url in targets:
+            try:
+                async with session.get(url) as response:
+                    response.raise_for_status()
+                    content = await response.text()
+
+                if bundle_type == "css":
+                    insights = analyze_css_bundle(filename, content)
+                else:
+                    insights = analyze_js_bundle(filename, content)
+
+                self.results["bundle_insights"][filename] = insights
+                last = await self.storage.get_last_bundle_insights(filename)
+                if last and not insights_equal(last["insights"], insights):
+                    evidence = summarize_bundle_diff(last["insights"], insights)
+                    change = self._stamp_change({
+                        "type": "bundle_insights_change",
+                        "filename": filename,
+                        "bundle_role": insights.get("bundle_role"),
+                        "summary": f"{filename} 的语义分析结果发生变化",
+                        "evidence": evidence,
+                    }, source_time=self.results.get("commit", {}).get("datetime", ""), source_time_type="bundle_commit_datetime")
+                    self.results["changes"].append(change)
+                    logger.warning(f"bundle 语义变化: {filename}")
+                    for item in evidence[:5]:
+                        logger.info(f"  {item}")
+
+                await self.storage.save_bundle_insights(
+                    filename,
+                    insights.get("bundle_role", bundle_type),
+                    insights,
+                )
+            except Exception as e:
+                logger.error(f"bundle 深度分析失败 {filename}: {e}")
 
     async def cleanup(self):
         """清理资源"""

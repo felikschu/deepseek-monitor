@@ -19,9 +19,6 @@ from loguru import logger
 ROOT_DIR = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT_DIR))
 
-from core.frontend_monitor import FrontendMonitor
-from core.config_monitor import ConfigMonitor
-from core.behavior_monitor import BehaviorMonitor
 from core.storage import StorageManager
 from core.alerter import Alerter
 from core.reporter import Reporter
@@ -50,8 +47,12 @@ class DeepSeekMonitor:
 
         # 监控器实例
         self.frontend_monitor = None
+        self.official_monitor = None
         self.config_monitor = None
         self.behavior_monitor = None
+        self.github_monitor = None
+        self.status_monitor = None
+        self.competitor_monitor = None
 
         logger.info("DeepSeek 监控系统初始化完成")
 
@@ -74,11 +75,19 @@ class DeepSeekMonitor:
         if log_config.get("file_path"):
             log_file = ROOT_DIR / log_config["file_path"]
             log_file.parent.mkdir(parents=True, exist_ok=True)
+            rotation_cfg = log_config.get("rotation", {})
+            rotation = None
+            if isinstance(rotation_cfg, dict):
+                max_size_mb = rotation_cfg.get("max_size_mb")
+                if max_size_mb:
+                    rotation = f"{max_size_mb} MB"
+            elif rotation_cfg:
+                rotation = rotation_cfg
 
             logger.add(
                 log_file,
                 level=log_config.get("level", "INFO"),
-                rotation=log_config.get("rotation", {}),
+                rotation=rotation,
                 retention="30 days",
                 format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} | {message}"
             )
@@ -87,9 +96,9 @@ class DeepSeekMonitor:
         """初始化所有监控器"""
         logger.info("正在初始化监控器...")
 
+        from core.frontend_monitor import FrontendMonitor
+
         self.frontend_monitor = FrontendMonitor(self.config, self.storage)
-        self.config_monitor = ConfigMonitor(self.config, self.storage)
-        self.behavior_monitor = BehaviorMonitor(self.config, self.storage)
 
         # 初始化数据库
         await self.storage.initialize()
@@ -113,13 +122,16 @@ class DeepSeekMonitor:
 
         try:
             # 1. 前端资源监控
-            logger.info("\n[1/3] 检查前端资源变化...")
+            logger.info("\n[1/6] 检查前端资源变化...")
             frontend_results = await self.frontend_monitor.check()
             results["checks"]["frontend"] = frontend_results
             logger.info(f"前端资源检查完成: {len(frontend_results.get('changes', []))} 个变化")
 
             # 2. 配置监控
-            logger.info("\n[2/3] 检查模型配置变化...")
+            logger.info("\n[2/6] 检查模型配置变化...")
+            if self.config_monitor is None:
+                from core.config_monitor import ConfigMonitor
+                self.config_monitor = ConfigMonitor(self.config, self.storage)
             config_results = await self.config_monitor.check()
             results["checks"]["config"] = config_results
             logger.info(f"配置检查完成: {len(config_results.get('changes', []))} 个变化")
@@ -127,13 +139,49 @@ class DeepSeekMonitor:
             # 3. 行为监控（这个比较慢，可选）
             behavior_enabled = self.config.get("behavior", {}).get("enabled", True)
             if behavior_enabled:
-                logger.info("\n[3/3] 检查行为特征变化...")
+                logger.info("\n[3/6] 检查行为特征变化...")
+                if self.behavior_monitor is None:
+                    from core.behavior_monitor import BehaviorMonitor
+                    self.behavior_monitor = BehaviorMonitor(self.config, self.storage)
                 behavior_results = await self.behavior_monitor.check()
                 results["checks"]["behavior"] = behavior_results
                 logger.info(f"行为检查完成: {len(behavior_results.get('changes', []))} 个变化")
             else:
-                logger.info("\n[3/3] 跳过行为特征检查（已禁用）")
+                logger.info("\n[3/6] 跳过行为特征检查（已禁用）")
                 results["checks"]["behavior"] = {"status": "disabled"}
+
+            # 4. 官方页面/文档监控
+            logger.info("\n[4/6] 检查官网与文档页变化...")
+            if self.official_monitor is None:
+                from core.official_monitor import OfficialMonitor
+                self.official_monitor = OfficialMonitor(self.config, self.storage)
+            official_results = await self.official_monitor.check()
+            results["checks"]["official"] = official_results
+            logger.info(f"官方页面检查完成: {len(official_results.get('changes', []))} 个变化")
+
+            # 5. GitHub / Status
+            logger.info("\n[5/6] 检查 GitHub 与 Status Page...")
+            if self.github_monitor is None:
+                from core.github_monitor import GitHubMonitor
+                self.github_monitor = GitHubMonitor(self.config, self.storage)
+            if self.status_monitor is None:
+                from core.status_monitor import StatusMonitor
+                self.status_monitor = StatusMonitor(self.config, self.storage)
+            results["checks"]["github"] = await self.github_monitor.check()
+            results["checks"]["status"] = await self.status_monitor.check()
+            logger.info(
+                f"GitHub 变化: {len(results['checks']['github'].get('changes', []))}，"
+                f"Status 变化: {len(results['checks']['status'].get('changes', []))}"
+            )
+
+            # 6. 竞品侦察
+            logger.info("\n[6/6] 检查竞品型号与价格信号...")
+            if self.competitor_monitor is None:
+                from core.competitor_monitor import CompetitorMonitor
+                self.competitor_monitor = CompetitorMonitor(self.config, self.storage)
+            competitor_results = await self.competitor_monitor.check()
+            results["checks"]["competitor"] = competitor_results
+            logger.info(f"竞品侦察完成: {len(competitor_results.get('changes', []))} 个变化")
 
         except Exception as e:
             logger.error(f"监控检查失败: {e}", exc_info=True)
@@ -198,10 +246,18 @@ class DeepSeekMonitor:
 
         if self.frontend_monitor:
             await self.frontend_monitor.cleanup()
+        if self.official_monitor:
+            await self.official_monitor.cleanup()
         if self.config_monitor:
             await self.config_monitor.cleanup()
         if self.behavior_monitor:
             await self.behavior_monitor.cleanup()
+        if self.github_monitor:
+            await self.github_monitor.cleanup()
+        if self.status_monitor:
+            await self.status_monitor.cleanup()
+        if self.competitor_monitor:
+            await self.competitor_monitor.cleanup()
 
         await self.storage.close()
 

@@ -2,7 +2,7 @@
 
 > **🚨 写在前面**：DeepSeek V4 迟迟不出，想必有非常多的人（包括我）都急得像热锅上的蚂蚁！这个系统就是为了缓解这种"等更新焦虑症"而诞生的——既然等不到新模型，那我们就来监控 DeepSeek 的一举一动，看看他们到底在偷偷搞什么！🔍
 
-追踪 DeepSeek 全平台变化的监控系统。自动检测网页端部署、Feature Flags 变化、API 端点增减、法律文档更新、GitHub 开源动态和官方状态页面事件。
+追踪 DeepSeek 全平台变化的监控系统。自动检测网页端部署、Feature Flags 变化、API 端点增减、法律文档更新、GitHub 开源动态、官方状态页面事件，以及智谱 / MiniMax 的新模型和商业化动作。
 
 > **English**: A monitoring system that tracks changes across the entire DeepSeek platform. Automatically detects web frontend deployments, Feature Flags changes, API endpoint additions/removals, legal document updates, GitHub open source activities, and official status page incidents.
 >
@@ -17,6 +17,11 @@
 - **法律文档检测** — Terms of Use / Privacy Policy 更新预警
 - **GitHub 监控** — 追踪 deepseek-ai 组织的新仓库、代码推送、Release 发布
 - **Status Page 监控** — 监控 status.deepseek.com 的服务状态和故障事件
+- **竞品侦察** — 追踪智谱 / MiniMax 官网、开放平台、定价文档里的新模型、价格、套餐和商业化入口
+- **源码探针** — 不只看 HTML，还会探测同站点 JS bundle，抓取藏在源码里的型号和业务信号
+- **链接发现** — 自动从首页 / 研究页 / 文档页抽出 `pricing` / `token-plan` / `promotion` / `mcp` / `agent` 等可疑入口
+- **商业动作解读** — 不只显示“改了”，还会生成如“Token Plan 月付档位”“GLM-5V-Turbo 纳入 Coding Plan 预告”这类摘要
+- **网页动向摘要** — 将官网公开信号与 chat bundle 隐藏能力并排展示，专门盯 DeepSeek 这几天的网页动向
 - **Web Dashboard** — 暗色主题可视化面板，支持一键检查和报告导出
 
 ## 快速开始
@@ -44,6 +49,11 @@ python3 web/server.py
 
 打开 http://localhost:8765 查看 Dashboard。
 
+Dashboard 里重点看两个区域：
+
+- `DeepSeek 网页动向`：快速看公开官网信号 + 源码隐藏能力
+- `Bundle 深挖`：看当前主 bundle 的 API 家族、路由模式、隐藏能力
+
 ### 3. 设置定时检查
 
 ```bash
@@ -51,6 +61,88 @@ crontab -e
 # 每3小时自动检查一次（包含前端、GitHub、Status Page）
 0 */3 * * * cd /path/to/deepseek-monitor && python3 web/server.py --no-open >> logs/cron.log 2>&1 &
 ```
+
+### 4. 运行竞品侦察报告
+
+```bash
+python3 scripts/recon_competitors.py
+python3 scripts/recon_competitors.py --vendor zhipu
+python3 scripts/recon_competitors.py --vendor minimax
+```
+
+脚本会复用 monitor 的探针逻辑，输出一份 markdown 报告到 `reports/`，重点列出：
+
+- 新模型型号
+- 价格/套餐变化
+- 商业动作解读
+- 商业化入口（如 Token Plan、MiniMax Agent、龙虾套餐、Code Interpreter）
+- 页面里新冒出来的可疑链接（如 `research/<id>`、`promotion`、`mcp`）
+- 同源脚本里挖出的隐藏信号
+
+### 4.1 运行通用网页侦察
+
+如果不是固定监控面，而是想临时“扒一个站”或“扒一个页面集合”，直接用通用脚本：
+
+```bash
+python3 scripts/recon_surfaces.py --profile official
+python3 scripts/recon_surfaces.py --profile competitor --vendor zhipu
+python3 scripts/recon_surfaces.py --url https://www.deepseek.com/en/ --extractor deepseek
+python3 scripts/recon_surfaces.py --url https://open.bigmodel.cn/ --extractor zhipu --expand-discovered 4
+```
+
+这个脚本会统一做这些事情：
+
+- 抓 HTTP 层信息：`final_url` / `status_code` / `Last-Modified` / `ETag`
+- 抓结构层信息：`title` / `meta` / `scripts` / `styles` / `anchors`
+- 对同站点 JS 做二次探针
+- 用站点对应 extractor 解析型号、价格、套餐、Agent/MCP/Coding 等语义信号
+- 自动发现 `pricing` / `promotion` / `research` / `mcp` / `agent` 等可疑链接
+- 可选自动展开首层发现链接，适合临时深挖新页面
+
+### 4.2 运行源码关键词侦察
+
+如果你已经知道要盯的词，比如 `coder / vision / agent / pricing / api`，可以直接跑源码关键词脚本：
+
+```bash
+python3 scripts/recon_keywords.py \
+  --page https://chat.deepseek.com \
+  --page https://www.deepseek.com/en/
+```
+
+也可以自定义关键词：
+
+```bash
+python3 scripts/recon_keywords.py \
+  --page https://chat.deepseek.com \
+  --keyword coder \
+  --keyword vision \
+  --keyword agent \
+  --keyword pricing \
+  --keyword api
+```
+
+这个脚本会：
+
+- 自动抓页面引用的 JS chunks
+- 不只搜关键词，还会抽取 DeepSeek 特有的语义结构
+- 对 `coder / vision / agent / pricing / api` 输出路由模式、API 家族、隐藏能力结论
+- 适合验证“源码里已经埋了什么，但前台还没完全放出来”
+- 优先检查 `layout / page / main-app / main.js`
+- 提取关键词上下文
+- 提取可读字符串
+- 提取 `/api/...` 路径
+- 生成一份 markdown 报告到 `reports/`
+
+### 5. 运行测试
+
+```bash
+bash scripts/run_tests.sh
+```
+
+这会做两件事：
+
+- Python 编译检查
+- `tests/` 下的单元测试，包括提取器、前后端高信号过滤逻辑
 
 ## 已发现的真实事件
 
@@ -146,6 +238,8 @@ crontab -e
 5. **法律文档** — 更新通常是重大变更的前兆（3月27日更新 → 3月29日宕机的先例）
 6. **GitHub 活动** — 监控 deepseek-ai 组织的仓库创建、代码推送、Release 发布
 7. **Status Page** — 爬取 status.deepseek.com 获取官方服务状态和故障事件
+8. **同源脚本探针** — 对官网、开放平台、定价文档的 JS bundle 做二次探测，补抓 HTML 没明说、但源码里已经出现的型号和价格信号
+9. **可疑链接发现** — 从导航和正文链接里发现 monitor 原来没盯住的新页面
 
 ## 项目结构
 
@@ -160,15 +254,19 @@ deepseek-monitor/
 │   ├── status_monitor.py    # Status Page 监控器
 │   ├── config_monitor.py    # 配置监控器（需 Playwright）
 │   ├── behavior_monitor.py  # 行为监控器（需 Playwright）
+│   ├── surface_recon.py     # 通用网页侦察器
 │   ├── storage.py           # SQLite 存储管理
 │   ├── alerter.py           # 告警模块
 │   └── reporter.py          # 报告生成
 ├── utils/
 │   ├── config.py            # 配置加载
 │   ├── diff_utils.py        # 差异比较工具
+│   ├── generic_signal_extractor.py # 通用网页信号提取器
+│   ├── recon_registry.py    # extractor / 站点规则注册表
 │   └── hash_utils.py        # Hash 工具
 ├── scripts/
 │   ├── monitor.py           # 命令行入口
+│   ├── recon_surfaces.py    # 通用网页侦察脚本
 │   └── start_dashboard.sh   # Dashboard 启动脚本
 ├── config.yaml              # 配置文件
 ├── CHANGELOG.md             # 详细变更记录
